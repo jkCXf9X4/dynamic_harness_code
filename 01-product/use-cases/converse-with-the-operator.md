@@ -11,7 +11,7 @@ status: current
 
 - The operator's request enters at the root agent, and the root's final result returns to the operator; this boundary is the only door between the human and the agent mesh.
 - The operator addresses the root, never an inner agent; inner agents reach the operator only by sending their result up through their parent chain to the root (`INFO-006`).
-- To inner agents the operator is invisible: no agent outside the root can address the operator or even observe the boundary (`INFO-004`).
+- To inner agents the operator is invisible, with one carve-out: any agent can ask the operator a question through the question channel (`INFO-023`); otherwise no agent outside the root can address the operator or observe the boundary (`INFO-004`).
 - The root reports to the operator through the same artifact tiers any consumer pulls (`INFO-006`).
 - Hosting the runtime and its container is the operator's concern, one layer out (`INFO-008`).
 

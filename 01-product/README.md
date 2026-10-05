@@ -17,5 +17,5 @@ The promised deliverable: the externally observable behavior the dhc runtime com
 ## Contents
 
 <!-- pb:index:start -->
-- [Use cases](use-cases/README.md) — The seven use cases the dhc runtime commits to, extracted from the vision
+- [Use cases](use-cases/README.md) — The use cases the dhc runtime commits to, extracted from the vision
 <!-- pb:index:end -->

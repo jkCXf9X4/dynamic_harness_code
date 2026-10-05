@@ -1,6 +1,6 @@
 ---
 title: Use cases
-summary: The seven use cases the dhc runtime commits to, extracted from the vision
+summary: The use cases the dhc runtime commits to, extracted from the vision
 ---
 
 # Use cases
@@ -33,4 +33,11 @@ How actors meet the dhc runtime: the action loop, delegation, artifacts, and the
 - **INFO-015** [Message another agent directly](message-another-agent-directly.md) — Any two agents can open a direct channel by identity and exchange request-reply traffic without a parent mediating
 - **INFO-016** [Meet in a shared room](meet-in-a-shared-room.md) — Agents join a shared room where every posted message is visible to all members and any member can reply
 - **INFO-017** [Converse with the operator](converse-with-the-operator.md) — The operator's request enters at the root agent and the root's result returns to the operator, the only door between human and mesh
+- **INFO-018** [Set up a multi-level organization](set-up-a-multi-level-organization.md) — The root delegates to group leads and each lead delegates further, with the delegating parent assigning each group its own communication structure and children receiving exactly those channels
+- **INFO-019** [Set up the whole hierarchy in one action](set-up-the-whole-hierarchy-in-one-action.md) — A single agent spawns every level of a hierarchy in one action and gives each middle agent its already-active subagents and a role message, while communication still routes through the parent chain
+- **INFO-020** [Survive an LLM call timing out or terminating](survive-an-llm-call-timing-out-or-terminating.md) — A timed-out or terminated LLM call fails the turn safely and surfaces as a failed result instead of hanging or crashing the agent
+- **INFO-021** [Detect context rot in an agent's output](detect-context-rot-in-an-agent-s-output.md) — The runtime detects degradation signatures such as repeating loops and gibberish in an agent's output stream and surfaces them to the parent
+- **INFO-022** [Chat continuously while subagents run](chat-continuously-while-subagents-run.md) — Operator messages keep flowing while subagents run, and a message sent mid-turn steers the root's current turn immediately
+- **INFO-023** [Ask the operator a question](ask-the-operator-a-question.md) — Any agent can ask the operator a question; the question routes up the parent chain and the answer returns to the asking agent
+- **INFO-028** [Drive the TUI from persistent files](drive-the-tui-from-persistent-files.md) — The operator's TUI is a minimal chat whose content and layout are read from persistent files rather than hardcoded into the interface
 <!-- pb:index:end -->
