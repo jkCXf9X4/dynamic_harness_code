@@ -1,0 +1,5 @@
+# pb.toml — breakdown-local overrides. Defaults apply otherwise (templates/pb.toml).
+
+[layout]
+# The installed skill bundles are reference material, not breakdown nodes.
+exclude_dirs = [".agents"]
