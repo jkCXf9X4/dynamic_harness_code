@@ -1,3 +1,6 @@
+### DEPRICATED ###
+
+
 """Example turns against the INFO-029 capability surface.
 
 Per INFO-002 one turn emits one Python block, and the block IS the
