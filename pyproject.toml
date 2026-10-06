@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dhc"
+version = "0.1.0"
+description = "Dynamic Harness Code — a recursive agent runtime where every agent turn is one Python block executed against a per-agent persistent REPL"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2",
+    "rich",
+    "openai>=2",
+    "python-dotenv",
+    "PyYAML",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[project.scripts]
+dhc = "dhc.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dhc*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
