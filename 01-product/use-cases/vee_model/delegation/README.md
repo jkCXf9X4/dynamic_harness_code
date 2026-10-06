@@ -20,7 +20,6 @@ layer up in Product.
 ## Contents
 
 <!-- pb:index:start -->
-- **INFO-004** [Decompose a task recursively](decompose-a-task-recursively.md) — A parent writes delegation code that spawns encapsulated child workers and receives summaries plus artifact IDs
 - **INFO-005** [Contain and surface a crashed child](contain-and-surface-a-crashed-child.md) — A crashed child is contained and never takes down siblings or the parent; it surfaces as a failed result
 - **INFO-009** [Fan out for a complicated problem](fan-out-for-a-complicated-problem.md) — A parent decomposes once into known-shape subtasks, runs them in parallel, and aggregates point-to-point results
 - **INFO-010** [Re-decompose from within a child](re-decompose-from-within-a-child.md) — A child that discovers its allocated requirement was under-scoped writes its own delegation code mid-task
