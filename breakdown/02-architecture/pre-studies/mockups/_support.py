@@ -14,11 +14,11 @@ T = TypeVar("T")
 
 
 def _content_id(*parts: str) -> str:
-    return hashlib.sha1("\x00".join(parts).encode()).hexdigest()[:8]
+    return hashlib.sha1("\x00".join(parts).encode()).hexdigest()
 
 
 def _agent_id() -> str:
-    return uuid.uuid4().hex[:8]
+    return uuid.uuid4().hex
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,8 @@ class Result(Generic[T]):
 
 @dataclass(frozen=True)
 class Event(Result):
-    child: Agent | None = None
+    originating_agent: Agent | None = None
+    result: Result | None = None
 
 
 class EventStream:
@@ -51,11 +52,11 @@ class EventStream:
 @dataclass(frozen=True)
 class ToolOutput:
     text: str
-    id: str
+    id: str = field(default_factory=_agent_id)
 
     @classmethod
     def minted(cls, text: str) -> "ToolOutput":
-        return cls(text=text, id=_content_id("out", text))
+        return cls(text=text)
 
     def search(self, pattern: str, limit: int = 5) -> list[tuple[int, str]]:
         hits = [(n, line) for n, line in enumerate(self.text.splitlines(), 1)
@@ -70,7 +71,6 @@ class ToolOutput:
 class Agent:
     requirement: str
     acceptance: tuple
-    channels: tuple = ()
     children: tuple = ()
     events: EventStream = field(default_factory=EventStream)
     id: str = field(default_factory=_agent_id)
@@ -103,10 +103,27 @@ class Agent:
 
     def spawn(self: Agent, requirement: str, acceptance: tuple = (),
               on_done: Callable[[Event], None] | None = None) -> Agent:
+
         child = Agent(requirement=requirement, acceptance=acceptance)
         if on_done is not None:
-            child.events.register(on_done)
+            self.events.register(on_done)
         return child
+
+@dataclass
+class Room:
+    name: str
+    members: list = field(default_factory=list)
+
+
+_ROOMS: dict[str, Room] = {}
+
+
+def room(agent: Agent, name: str) -> Room:
+    if name not in _ROOMS:
+        _ROOMS[name] = Room(name=name)
+    return _ROOMS[name]
+
+
 
 
 def bash(cmd: str) -> str:
