@@ -17,7 +17,7 @@ How actors meet the dhc runtime: the action loop, delegation, artifacts, and the
 ## Contents
 
 <!-- pb:index:start -->
-- **INFO-002** [Run a coded action](run-a-coded-action.md) — A worker turn becomes one Python block the runtime persists and executes in a fresh subprocess
+- **INFO-002** [Run a coded action](run-a-coded-action.md) — A worker turn becomes one Python block the runtime persists and executes against the agent's persistent REPL
 - **INFO-003** [Self-verify a turn](self-verify-a-turn.md) — Each action block analyzes its requirement, implements, verifies against the parents acceptance criteria, and reports
 - **INFO-004** [Decompose a task recursively](decompose-a-task-recursively.md) — A parent writes delegation code that spawns encapsulated child workers and receives summaries plus artifact IDs
 - **INFO-005** [Contain and surface a crashed child](contain-and-surface-a-crashed-child.md) — A crashed child stays contained in its own thread and surfaces as a failed result to its parent
@@ -42,6 +42,15 @@ How actors meet the dhc runtime: the action loop, delegation, artifacts, and the
 - **INFO-024** [Resume an interrupted run from persisted state](resume-an-interrupted-run-from-persisted-state.md) — A dead runtime process loses every running hierarchy; candidate: per-agent checkpoints and a resume that rebuilds the run from persisted state
 - **INFO-025** [Embed the runtime in a host process behind an API](embed-the-runtime-in-a-host-process-behind-an-api.md) — A host application can construct and drive the runtime through a committed API surface, decoupling the harness from any UI
 - **INFO-026** [Compress a running agent's context](compress-a-running-agent-s-context.md) — Collapse accumulated context into a summary that leans on persisted artifacts, the committed remedy for detected context rot short of re-decomposition
-- **INFO-027** [Trace a failure to its provenance without re-running](trace-a-failure-to-its-provenance-without-re-running.md) — A queryable trail tying each agent to its actions and artifacts, so a failure is diagnosed by reading records only
+- **INFO-027** [Trace a failure to its provenance without re-running](trace-a-failure-to-its-provenance-without-re-running.md) — A queryable event trail — CALL, DELEGATE, COMPLETE, AWAIT, CALLBACK — tying each agent to its actions and artifacts, so a failure is diagnosed by reading records only
 - **INFO-028** [Minimalistic UI/TUI](drive-the-tui-from-persistent-files.md) — The operator's TUI is a minimal chat whose content and layout
+- **INFO-030** [Give each agent a persistent REPL](give-each-agent-a-persistent-repl.md) — Each agent works in a persistent REPL of its own — state persists across actions, agent-developed tools live in it, and it is the agent's workspace rather than the run's
+- **INFO-031** [Synchronize with a child on demand](synchronize-with-a-child-on-demand.md) — A parent blocks on await until a child reaches a terminal state — the fork/join pattern, composable with callbacks and polling
+- **INFO-032** [Poll a child without blocking](poll-a-child-without-blocking.md) — A parent inspects a child's lifecycle state on demand — pending, running, completed, failed, cancelled, timeout — without synchronizing
+- **INFO-033** [Run completion callbacks in the parent](run-completion-callbacks-in-the-parent.md) — A parent can register a callback that runs in its own REPL when a child settles — success or failure — never concurrently with parent code
+- **INFO-034** [Cancel a running child](cancel-a-running-child.md) — A parent can cancel a child it no longer needs; the child settles as cancelled and the outcome surfaces like any terminal state
+- **INFO-035** [Keep an output history distinct from REPL state](keep-an-output-history-distinct-from-repl-state.md) — Explicitly returned outputs are retained as a queryable history, separate from the agent's working variables
+- **INFO-036** [Isolate each child's REPL and pass context explicitly](isolate-each-child-s-repl-and-pass-context-explicitly.md) — Each child works in its own REPL; the parent passes explicit inputs, and nothing of the parent's namespace is shared implicitly
+- **INFO-037** [Commit to a minimal execution-core contract](commit-to-a-minimal-execution-core-contract.md) — The execution behaviors lack a committed minimal contract; candidate: persistent REPL, non-blocking delegate, await/poll/callback/cancel, with observability at boundaries only
+- [commit-to-a-minimal-execution-core-contract.analysis](commit-to-a-minimal-execution-core-contract.analysis.md)
 <!-- pb:index:end -->

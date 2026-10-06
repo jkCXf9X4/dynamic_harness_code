@@ -12,6 +12,7 @@ status: draft
 - The pain: a runtime process death — crash, OOM, host shutdown — loses every running hierarchy, because parent liveness is in-process (`INFO-014`) and nothing committed rebuilds the run.
 - What already survives: artifacts and every action's code persist immutably (`INFO-006`, `INFO-002`), so results are on disk — but there is no committed way to reassemble a run from them.
 - The candidate: auto-persist a per-agent checkpoint each committed turn; a resume rebuilds the hierarchy from those checkpoints and continues; recovery reuses partial on-disk results instead of redoing finished work.
+- The REPL's state identity supports this: an agent's workspace can be checkpointed and identified as it evolves — recovery, debugging, branching, and comparing alternative execution paths need only the state identifiers, with full snapshots stored separately (`INFO-030`).
 - Scope note: distinct from crash containment (`INFO-005`) — containment surfaces a failed child to its parent, while resume restarts a dead run.
 
 ## Owns

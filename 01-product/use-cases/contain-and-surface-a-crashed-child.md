@@ -11,7 +11,7 @@ status: current
 
 - Every agent runs wrapped in its own thread or process (`INFO-001`).
 - A crashed child is contained in its thread and never takes down a sibling or the parent.
-- The crash surfaces to the parent as a failed result, indistinguishable in shape from a success.
+- The crash surfaces to the parent as a failed result — one distinguishable terminal state among completed, failed, cancelled, and timeout (`INFO-032`).
 
 ## Owns
 - Crash containment and failure surfacing.

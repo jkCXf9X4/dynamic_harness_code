@@ -11,7 +11,7 @@ status: current
 
 - Findings, results, and every action's code persist as immutable, content-addressed artifacts (`INFO-001`).
 - Parents receive summaries plus artifact IDs; consumers pull headline → summary → report tiers on demand.
-- State lives in artifacts, never in agent memory or container memory; every action runs in a fresh interpreter.
+- Working state lives in the agent's persistent REPL between actions; artifacts remain the durable medium for findings that cross agents or must outlive them (`INFO-030`).
 
 ## Owns
 - The artifact-driven communication and progressive-disclosure contract.

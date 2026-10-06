@@ -24,7 +24,7 @@ keeps agent turns few.
 ## The action loop
 
 1. The agent emits Python for its turn.
-2. The runtime persists the code as an immutable artifact, then executes it in its own subprocess.
+2. The runtime persists the code as an immutable artifact, then executes it against the agent's persistent REPL in its own subprocess.
 3. The V-model is the shape of every action: the code analyzes its allocated
    requirement, implements, verifies against the parent's acceptance criteria, and
    reports — a small V per turn.
@@ -45,8 +45,9 @@ keeps agent turns few.
    as immutable, content-addressed artifacts; parents receive summaries plus artifact IDs.
 8. **Progressive disclosure.** Artifacts expose headline → summary → report tiers; consumers
    pull detail on demand.
-9. **Disposable workers.** State lives in artifacts — not agent memory, not container
-   memory; every action runs in a fresh interpreter.
+9. **Per-agent persistent REPL.** Every agent works in a persistent computational workspace of its
+   own — REPL state persists across actions, agent-developed tools live in it, and artifacts remain
+   the durable medium for findings that cross agents or must outlive the agent.
 
 ## Inspirations
 

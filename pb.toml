@@ -7,4 +7,4 @@ exclude_dirs = [".agents"]
 [nodes]
 # Reference material attached to a candidate (INFO-029), not a leaf: no
 # identity, no index presence; ID citations inside still resolve.
-exempt = ["give-agents-an-in-code-capability-surface.verbs.md"]
+exempt = ["give-agents-an-in-code-capability-surface.verbs.md", "commit-to-a-minimal-execution-core-contract.analysis.md"]

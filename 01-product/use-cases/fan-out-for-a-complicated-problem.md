@@ -12,6 +12,7 @@ status: current
 - A complicated problem decomposes into known-shape subtasks, so the parent writes its delegation code once, before any child runs (`INFO-004`).
 - Each child receives its allocated requirement plus acceptance criteria and answers point-to-point: one summary plus artifact IDs back to the parent (`INFO-006`).
 - Children run in parallel and are contained individually (`INFO-005`); no child communicates with another child.
+- Spawning is non-blocking: the delegation action returns task handles immediately; the parent synchronizes later — on await (`INFO-031`), by polling (`INFO-032`), or by callback (`INFO-033`).
 - The parent aggregates the child results into one artifact and returns it as its own result.
 - The task tree is static: who-talks-to-whom is fixed at decomposition time.
 
