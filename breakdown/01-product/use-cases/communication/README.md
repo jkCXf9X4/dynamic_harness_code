@@ -1,6 +1,6 @@
 ---
 title: Communication
-summary: How messages travel after spawn — await, poll, callbacks, completion dispatch, cancel delivery, and settlement
+summary: How messages travel after spawn — await, poll, callbacks, completion scheduling, and settlement
 date: 2026-10-06
 status: current
 ---
@@ -20,7 +20,6 @@ status: current
 - **INFO-031** [Synchronize with a child on demand](synchronize-with-a-child-on-demand.md) — A parent blocks on await until a child reaches a terminal state — the fork/join pattern, composable with callbacks and polling
 - **INFO-032** [Poll a child without blocking](poll-a-child-without-blocking.md) — A parent inspects a child's lifecycle state on demand — pending, running, completed, failed, cancelled, timeout — without synchronizing
 - **INFO-033** [Run completion callbacks in the parent](run-completion-callbacks-in-the-parent.md) — A parent can register a callback that runs in its own REPL when a child settles — success or failure — never concurrently with parent code
-- **INFO-039** [Schedule child completions between parent actions](schedule-child-completions-between-parent-actions.md) — Child completions reach the parent as events and the parent's runtime dispatches callbacks between the parent's own actions
-- **INFO-040** [Stop a cancelled child's worker](stop-a-cancelled-child-s-worker.md) — A parent's cancel request terminates the child's worker, and the child settles as cancelled with its partial work discarded
-- **INFO-046** [Settle child completions on one channel, at most once each](settle-child-completions-on-one-channel-at-most-once-each.md) — One settled child becomes one event on the parent's channel; the callback receives settled values — at most once each, never concurrently — while the runtime resolves the stream outside run_code
+- **INFO-039** [Schedule child completions between parent actions](schedule-child-completions-between-parent-actions.md) — Callbacks for settled children run between the parent's own actions, in completion order
+- **INFO-046** [Settle child completions on one channel, at most once each](settle-child-completions-on-one-channel-at-most-once-each.md) — One settled child becomes one completion the parent receives — the callback gets settled values, at most once each, never concurrently
 <!-- pb:index:end -->

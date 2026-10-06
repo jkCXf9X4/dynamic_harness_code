@@ -10,7 +10,7 @@ status: current
 # Chat continuously while subagents run
 
 - The operator's chat with the root stays live while the hierarchy below runs: running subagents never block message delivery (`INFO-017`, `INFO-014`).
-- A message the operator sends while the root is mid-turn steers immediately: it is injected into the current turn's context and can redirect running work.
+- A message the operator sends while the root is mid-turn steers immediately: it reaches the current turn and can redirect running work.
 - The root's responses stream back continuously instead of arriving only as a final result, pulled on demand through the artifact tiers (`INFO-006`).
 
 ## Owns

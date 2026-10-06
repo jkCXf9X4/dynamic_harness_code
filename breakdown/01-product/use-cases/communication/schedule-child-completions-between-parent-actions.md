@@ -2,19 +2,20 @@
 id: INFO-039
 type: info
 title: Schedule child completions between parent actions
-summary: Child completions reach the parent as events and the parent's runtime dispatches callbacks between the parent's own actions
+summary: Callbacks for settled children run between the parent's own actions, in completion order
 date: 2026-10-06
 status: current
 ---
 
 # Schedule child completions between parent actions
 
-- When a child settles, its completion reaches the parent as an event; the parent's runtime queues it and dispatches the registered callback between the parent's own actions.
-- Callbacks run in completion order, not delegation order: children notify independently as they settle.
+- When a child settles, its registered callback runs between the parent's own actions.
+- Callbacks run in completion order, not delegation order: children settle independently.
 
 ## Owns
-- The completion-dispatch design: child completions queue as they happen; callbacks dispatch between parent actions.
+- The inter-action scheduling contract: callbacks run between the parent's own actions, in completion order.
 
 ## Excludes
-- The completion-callback contract this dispatch delivers — `INFO-033`.
+- The completion-callback contract this scheduling delivers — `INFO-033`.
+- The dispatch machinery that carries completions between actions — `INFO-047`.
 - The parent-side synchronization primitives, await and poll — `INFO-031`, `INFO-032`.

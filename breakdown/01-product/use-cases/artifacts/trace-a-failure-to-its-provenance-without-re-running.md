@@ -2,7 +2,7 @@
 id: INFO-027
 type: info
 title: Trace a failure to its provenance without re-running
-summary: A queryable event trail — CALL, DELEGATE, COMPLETE, AWAIT, CALLBACK — tying each agent to its actions and artifacts, so a failure is diagnosed by reading records only
+summary: A queryable event trail ties each agent to its actions and artifacts, so a failure is diagnosed by reading records only
 date: 2026-10-05
 status: draft
 ---
@@ -20,21 +20,21 @@ status: draft
 
 ## The design
 
-- The event vocabulary is concrete: CALL (input → output at the code boundary), DELEGATE (task → input), COMPLETE (task → output), AWAIT (task → synchronization point), CALLBACK (task → callback execution).
-- Every event carries its causal ids — calls carry `call_id` and `parent_call_id`; delegations carry `task_id`, `parent_task_id`, and `parent_call_id` — so concurrent work reconstructs as a DAG, not a sequence.
-- Large payloads are traced by reference: the trace records content hashes and artifact references for big inputs and outputs; the payload itself stays in the artifact store (`INFO-006`).
+- The trail is a boundary event log: five event kinds carrying causal ids, so concurrent work reconstructs as a DAG, not a sequence (`INFO-049`).
+- Large payloads are traced by reference — the trail carries content hashes and artifact references, never the payload itself (`INFO-006`).
 - Instrumentation is boundary-only: the trace records what crossed the boundary, never the internals of executed code — operations, assignments, filesystem and network accesses stay untraced unless they are part of an emitted output. The action space stays unconstrained while the trace stays manageable.
 - Terminal states are typed — completed, failed, cancelled, timeout — so failures are first-class outcomes, not generic errors (`INFO-005`, `INFO-032`, `INFO-034`).
 
 ## Notes
 
 - Full analysis: the `commit-to-a-minimal-execution-core-contract` sidecar, attached to `INFO-037`.
-- Evidence from practice: immutable, greppable records make failure analysis a read-only query.
+- Evidence from practice: immutable records make failure analysis a read-only query.
 
 ## Owns
 - The provenance-trail candidate: a queryable run trace for failure triage without re-running.
 
 ## Excludes
+- The event-log data model — vocabulary, causal ids, by-reference payloads — `INFO-049`.
 - Artifact persistence — `INFO-006`.
 - Action persistence — `INFO-002`.
 - Crash surfacing — `INFO-005`.

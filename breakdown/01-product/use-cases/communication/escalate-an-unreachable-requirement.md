@@ -10,7 +10,7 @@ status: current
 # Escalate an unreachable requirement
 
 - A child whose acceptance criteria prove unreachable reports a failed result carrying the reason, instead of a partial success (`INFO-005`).
-- The escalation is a control message upstream only: the parent re-allocates by re-decomposing, relaxing the criteria, or retrying with different context (`INFO-004`).
+- The escalation travels upstream only: the parent re-allocates by re-decomposing, relaxing the criteria, or retrying with different context (`INFO-004`).
 - Siblings are not notified; the failed result is indistinguishable in shape from any other result, only in content (`INFO-005`).
 - The child stops at the point of failure and stays contained (`INFO-005`).
 

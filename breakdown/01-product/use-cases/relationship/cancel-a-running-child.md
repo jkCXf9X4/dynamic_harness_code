@@ -21,3 +21,4 @@ status: current
 - Child-initiated failure, which the child reports itself — `INFO-011`.
 - Crash containment, which covers unplanned child death — `INFO-005`.
 - The callback contract that observes the outcome — `INFO-033`.
+- How cancellation is delivered to the child's worker — `INFO-040`.

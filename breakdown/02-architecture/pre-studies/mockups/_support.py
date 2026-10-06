@@ -12,8 +12,9 @@ log, and the artifact store are the harness's, not sketched here.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
-from typing import Generic, TypeVar
+import uuid
+from dataclasses import dataclass, field
+from typing import Callable, Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -21,6 +22,13 @@ T = TypeVar("T")
 def _content_id(*parts: str) -> str:
     """Content-addressed handle — git-style sha1, not security."""
     return hashlib.sha1("\x00".join(parts).encode()).hexdigest()[:8]
+
+
+def _agent_id() -> str:
+    """Static per-agent id — uuid, not content: agents are execution, not
+    content — identical requirements are distinct agents. Unique across
+    REPLs, thread or process (INFO-038): OS entropy, no counter to lock."""
+    return uuid.uuid4().hex[:8]
 
 
 @dataclass(frozen=True)
@@ -33,9 +41,12 @@ class Artifact:
 
 
 @dataclass(frozen=True)
-class Result(Generic[T]):
-    """Generic terminal — ok/value/reason, uniform across verbs and contexts:
-the context's own payload rides `value`; provenance rides `artifacts`."""
+class Status(Generic[T]):
+    """The one shape, peek to terminal — `done` is the poll's predicate
+    (INFO-043); the settled payload rides behind it (INFO-031), uniform
+    across verbs and contexts: the context's own in `value`, provenance in
+    `artifacts`. Until `done`, the payload fields stay empty."""
+    done: bool
     ok: bool
     value: T | None = None  # the context's own — headline, tally, verdict
     reason: str = ""
@@ -43,16 +54,25 @@ the context's own payload rides `value`; provenance rides `artifacts`."""
 
 
 @dataclass(frozen=True)
-class Status:
-    """Non-blocking peek — the poll's predicate (INFO-043)."""
-    done: bool
-    ok: bool
+class Event(Status):
+    """One arrived event — a settled Status tagged with its child (INFO-039):
+    the stream's only intake type — only a Status enters (INFO-045)."""
+    child: Agent | None = None    # who the event is about — the callback's payload
 
 
-@dataclass(frozen=True)
-class Event(Result):
-    """One arrived event — a settled Result tagged with its child (INFO-039)."""
-    child: Agent | None = None    # who the event is about — the drain path
+class EventStream:
+    """One agent's event stream — the channel completions ride (INFO-046).
+
+    Intake is typed to the terminal: only a Status enters (INFO-045). The
+    general event loop polls it outside run_code — the REPL never polls or
+    drains it (INFO-045); the queue is runtime mechanics and stays a comment."""
+
+    def register(self, callback) -> None:
+        """Registration by held handle (INFO-045): an agent registers its own
+        stream, a child's via its spawn handle, a peer's only via a wired
+        channel (INFO-018). The callback runs in the registrant's REPL
+        between its own actions, never concurrently (INFO-033)."""
+        return None    # sketch: the shape is the annotation
 
 
 @dataclass(frozen=True)
@@ -84,11 +104,16 @@ class Agent:
     mark the boundary — `tool` is CALL-shaped, the boundary log is runtime
     mechanics and stays a comment (INFO-042).
     """
-    id: str
     requirement: str
     acceptance: tuple       # the parent's criteria
     channels: tuple = ()
     children: tuple = ()    # the previous turn's spawn handles, REPL-bound (INFO-030)
+    events: EventStream = field(default_factory=EventStream)
+                             # the agent's stream — one channel (INFO-045),
+                             # polled by the general event loop, never the REPL
+    id: str = field(default_factory=_agent_id)
+                             # static per agent — minted once at birth, frozen
+                             # with the handle; never derived, never recomputed
 
     def tool(self, callable, *args, **kwargs) -> ToolOutput:
         """One sync tool call — the ONE at the boundary."""
@@ -99,12 +124,12 @@ class Agent:
         return Artifact(id=_content_id("art", headline, summary),
                         headline=headline, summary=summary, report=report)
 
-    def fail(self, reason: str) -> Result[T]:
+    def fail(self, reason: str) -> Status[T]:
         """Failure = success shape."""
-        return Result(ok=False, reason=reason)
+        return Status(done=True, ok=False, reason=reason)
 
-    def complete(self, headline: str, artifacts=()) -> Result[T]:
-        return Result(ok=True, value=headline, artifacts=tuple(artifacts))
+    def complete(self, headline: str, artifacts=()) -> Status[T]:
+        return Status(done=True, ok=True, value=headline, artifacts=tuple(artifacts))
 
     # — child handles: the children are Agents too (INFO-043) —
 
@@ -113,32 +138,33 @@ class Agent:
         """The poll predicate (INFO-043) — attribute read vs method, unpinned."""
         return False    # sketch: the shape is the annotation
 
-    def status(self) -> Status:
-        """Sync, non-blocking peek (INFO-043)."""
+    def status(self) -> Status[T]:
+        """Sync, non-blocking peek (INFO-043) — the terminal's own shape,
+        payload still empty."""
         return Status(done=self.done, ok=False)    # sketch: never settles ok
 
-    def result(self) -> Result[T]:
+    def result(self) -> Status[T]:
         """Await/settle — settles at once in the sketch (INFO-031)."""
         return self.fail("sketch")    # the shape is the return type
 
-    def cancel(self, reason: str) -> Result[T]:
+    def cancel(self, reason: str) -> Status[T]:
         """INFO-034 — the cancelled result is typed like any other."""
         return self.fail(reason)     # one shape, success or failure (INFO-011)
 
-    def drain(self) -> tuple:
-        """Arrived events, completion order (INFO-039) — method or fn, unpinned."""
-        return ()                    # sketch: the shape is the annotation
-
-
-Worker = Agent    # spec value, not a built-in (INFO-007) — children are Agents too
-
-
-def spawn(parent: Agent, spec: type, requirement: str,
-          acceptance: tuple = ()) -> Agent:
-    """INFO-029 — the free verb takes the value acted on first: the parent.
-    Children are Agents too (INFO-043): the handle members ride Agent."""
-    return Agent(id=_content_id("agent", parent.id, requirement),
-                 requirement=requirement, acceptance=acceptance)
+    def spawn(self: Agent, requirement: str, acceptance: tuple = (),
+              on_done: Callable[[Event], None] | None = None) -> Agent:
+        """INFO-029 — the free verb takes the value acted on first: the parent.
+        Children are Agents too (INFO-043): the handle members ride Agent.
+        The optional completion hook (INFO-033): spawn-time registration on
+        the child's stream — one callback serves success and failure, receives
+        the settled Event, and runs between this parent's own actions, never
+        concurrently (INFO-039)."""
+        child = Agent(requirement=requirement, acceptance=acceptance)
+        if on_done is not None:
+            child.events.register(on_done)    # the stream's one intake — the
+                                              # same register as handle-side
+                                              # (INFO-045)
+        return child
 
 
 def bash(cmd: str) -> str:
