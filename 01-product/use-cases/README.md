@@ -20,5 +20,6 @@ How actors meet the dhc runtime: the action loop, delegation, artifacts, and the
 - [Artifacts](artifacts/README.md) — The durable, content-addressed medium agents publish, consume, and trace
 - [Capabilities and the primitive surface](capabilities/README.md) — Extending what agents can do, and the minimal execution-core contract behind it
 - [Operator use cases](operator/README.md) — The operator converses with, steers, and observes the mesh through the root and the TUI
+- [Peer exchange](peers/README.md) — Agents exchange work directly — sibling handoffs, direct messages, and shared rooms
 - [Run the runtime](run-the-runtime/README.md) — Host, resume, and embed the runtime process as a whole, from outside the agent mesh
 <!-- pb:index:end -->

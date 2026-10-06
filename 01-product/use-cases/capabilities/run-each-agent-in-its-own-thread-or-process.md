@@ -19,4 +19,4 @@ status: current
 ## Excludes
 - The crash-containment contract this placement delivers — `INFO-005`.
 - The container security boundary around all agents — `INFO-008`.
-- The child-REPL isolation contract instance this places — `INFO-036`.
+- The child-REPL isolation contract instance this places — `INFO-030`.

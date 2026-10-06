@@ -19,6 +19,5 @@ or embed it behind an API.
 
 <!-- pb:index:start -->
 - **INFO-008** [Host the runtime in a container](host-the-runtime-in-a-container.md) — An operator runs the dhc runtime inside Docker or Podman as the outer security boundary
-- **INFO-024** [Resume an interrupted run from persisted state](resume-an-interrupted-run-from-persisted-state.md) — A dead runtime process loses every running hierarchy; candidate: per-agent checkpoints and a resume that rebuilds the run from persisted state
 - **INFO-025** [Embed the runtime in a host process behind an API](embed-the-runtime-in-a-host-process-behind-an-api.md) — A host application can construct and drive the runtime through a committed API surface, decoupling the harness from any UI
 <!-- pb:index:end -->

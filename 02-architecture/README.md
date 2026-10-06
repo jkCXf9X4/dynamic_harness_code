@@ -22,5 +22,4 @@ The organizing design: how the dhc runtime's parts fit and interact. Facts here 
 - **INFO-042** [Harness design model](harness-design-model.md) — The harness runs the code runtime as a black box — traceability attaches at the call-code and delegation boundaries only — giving the agent a highly expressive action space with observable, attributable boundaries
 - **INFO-043** [Recommended minimal harness contract](recommended-minimal-harness-contract.md) — The entire model stays small — call_code, delegate, await, status, cancel — with four concepts (REPL state, call, task, event) and five events (CALL, DELEGATE, COMPLETE, AWAIT, CALLBACK), enough to answer what was asked, returned, spawned, and observed
 - [Own execution](own-execution/README.md) — One agent's own action loop, verification, resilience, and persistent state
-- [Peer exchange](peers/README.md) — Agents exchange work directly — sibling handoffs, direct messages, and shared rooms
 <!-- pb:index:end -->
