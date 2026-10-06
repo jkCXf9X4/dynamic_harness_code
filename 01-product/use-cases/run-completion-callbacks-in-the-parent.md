@@ -10,9 +10,9 @@ status: current
 # Run completion callbacks in the parent
 
 - Delegation accepts an optional completion callback; when the child reaches a terminal state, the callback runs in the parent's REPL.
-- The callback never executes concurrently against the parent's workspace: child settles → completion event → parent callback queue → callback runs between parent actions. The parent REPL is never concurrently mutated.
+- The callback never executes concurrently against the parent's workspace — the parent's REPL is never concurrently mutated.
 - One callback serves success and failure: it receives the terminal state and the result or error, so no separate error-callback mechanism is needed.
-- Multiple children notify independently; completions are queued as they happen, so the parent observes results as they become available.
+- Multiple children notify independently; the parent observes each result as it becomes available.
 - A callback may process a child's result before the parent explicitly awaits it; awaiting afterwards still succeeds — it ensures terminal state, not first observation (`INFO-031`).
 
 ## Owns

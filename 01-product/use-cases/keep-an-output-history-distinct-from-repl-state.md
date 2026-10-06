@@ -11,7 +11,7 @@ status: current
 
 - Each action's returned output is retained in an output history the agent can inspect later — the agent can recover information it previously generated without re-running it.
 - Output history is separate from REPL state: only explicitly returned or emitted results enter the history; ordinary variable assignments stay private workspace state (`INFO-030`).
-- This keeps externally meaningful output — what crossed the boundary — distinct from internal working state, so the provenance trail records outputs without treating every assignment as an event (`INFO-027`).
+- This keeps externally meaningful output — what crossed the boundary — distinct from internal working state.
 
 ## Owns
 - The output-history contract: what enters it, how it is retained, and how it is inspected.

@@ -10,7 +10,7 @@ status: current
 # Cancel a running child
 
 - The parent can cancel a child whose result it no longer needs — for example, one fan-out branch answered sufficiently, so the rest are stopped (`INFO-009`).
-- Cancellation is a parent-initiated transition to the cancelled terminal state: the child's worker is stopped and its partial work is not merged.
+- Cancellation is parent-initiated: the child settles as cancelled, and the parent never receives its partial work.
 - The outcome surfaces like any terminal state: the completion event records cancelled, callbacks observe it (`INFO-033`), and the provenance trail shows it (`INFO-027`).
 - Cancelling does not interrupt the parent: it keeps running (`INFO-014`).
 
