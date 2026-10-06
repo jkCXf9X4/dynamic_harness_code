@@ -30,7 +30,7 @@ class Artifact:
 
 
 @dataclass(frozen=True)
-class Status(Generic[T]):
+class Result(Generic[T]):
     done: bool
     ok: bool
     value: T | None = None
@@ -39,7 +39,7 @@ class Status(Generic[T]):
 
 
 @dataclass(frozen=True)
-class Event(Status):
+class Event(Result):
     child: Agent | None = None
 
 
@@ -63,7 +63,7 @@ class ToolOutput:
         return hits[:limit]
 
     def read(self, size: int = 4_000, offset: int = 0) -> str:
-        return self.text[offset:size]
+        return self.text[offset:offset + size]
 
 
 @dataclass(frozen=True)
@@ -82,23 +82,23 @@ class Agent:
         return Artifact(id=_content_id("art", headline, summary),
                         headline=headline, summary=summary, report=report)
 
-    def fail(self, reason: str) -> Status[T]:
-        return Status(done=True, ok=False, reason=reason)
+    def fail(self, reason: str) -> Result[T]:
+        return Result(done=True, ok=False, reason=reason)
 
-    def complete(self, headline: str, artifacts=()) -> Status[T]:
-        return Status(done=True, ok=True, value=headline, artifacts=tuple(artifacts))
+    def complete(self, headline: str, artifacts=()) -> Result[T]:
+        return Result(done=True, ok=True, value=headline, artifacts=tuple(artifacts))
 
     @property
     def done(self) -> bool:
         return False
 
-    def status(self) -> Status[T]:
-        return Status(done=self.done, ok=False)
+    def status(self) -> Result[T]:
+        return Result(done=self.done, ok=False)
 
-    def result(self) -> Status[T]:
+    def result(self) -> Result[T]:
         return self.fail("sketch")
 
-    def cancel(self, reason: str) -> Status[T]:
+    def cancel(self, reason: str) -> Result[T]:
         return self.fail(reason)
 
     def spawn(self: Agent, requirement: str, acceptance: tuple = (),

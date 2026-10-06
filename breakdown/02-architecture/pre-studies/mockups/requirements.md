@@ -25,12 +25,14 @@ the shapes; the scenario files sketch turns against them.
 - **Worker and tools** — `Worker` is a spec value, not a built-in; concrete
   tools import per-run (INFO-007, INFO-044).
 - **One result shape** — failure is the success shape: `fail`, `complete`,
-  and a cancelled child all settle the same Status; there is no third
+  and a cancelled child all settle the same Result; there is no third
   terminal (INFO-011, INFO-005).
 - **Self-verify in-block** — the check is the branch, the reason is the
   block's own formatted string (INFO-003).
-- **Provenance by reference** — artifacts ride as content-addressed id pairs,
-  never inline (INFO-027).
+- **Provenance by reference** — artifacts ride as content-addressed
+  `(source, artifact)` pairs, never inline (INFO-027): the source is what
+  the finding was derived from, the artifact the published finding. Order
+  pinned in the mockups README; rehydrate through the free `read`.
 - **Child-handle verbs extend the convention** — children are Agents too
   (INFO-043): status, result, and cancel ride their handles, cancel takes
   `reason=`; they extend INFO-029's free-verb convention, never invented
@@ -46,16 +48,17 @@ the shapes; the scenario files sketch turns against them.
   frozen with the handle; never derived, never recomputed.
 - **Artifact tiers** — one published finding: headline / summary / report;
   the verdict itself rides the report tier (INFO-006).
-- **Status** — the one shape, peek to terminal: `done` is the poll's
+- **Result** — the one shape, peek to terminal: `done` is the poll's
   predicate (INFO-043); the settled payload rides behind it (INFO-031),
   uniform across verbs and contexts — the context's own in `value`,
   provenance in `artifacts`; until `done`, the payload fields stay empty.
-- **Event** — one arrived event: a settled Status tagged with its child
+  Named and typed per INFO-048: only a frozen Result enters the stream.
+- **Event** — one arrived event: a settled Result tagged with its child
   (INFO-039) — who the event is about, the callback's payload.
 - **EventStream** — one agent's stream, the channel completions ride
-  (INFO-046); intake is typed to the terminal — only a Status enters
-  (INFO-045). The general event loop polls it outside run_code; the REPL
-  never polls or drains it.
+  (INFO-046); intake is typed to the terminal — only a frozen Result enters
+  (INFO-048). The general event loop polls it outside agent action code
+  (INFO-048); the REPL never polls or drains it (INFO-045).
 - **register** — registration by held handle (INFO-045): an agent registers
   its own stream, a child's via its spawn handle, a peer's only via a wired
   channel (INFO-018). The callback runs in the registrant's REPL between
@@ -63,14 +66,20 @@ the shapes; the scenario files sketch turns against them.
 - **ToolOutput** — the result-side surface: the full output persisted as an
   artifact, a handle back; content-addressed, by-reference open form
   (INFO-027). `search` returns ranked hits — order of appearance stands in
-  for rank; `read` is a size-capped pull of the report tier.
+  for rank; `read` is a size-capped pull of the report tier — the window is
+  `[offset, offset+size)`, the result-side dispatch of the free `read`.
+- **read** — the artifact plane's pull (INFO-006): rehydrates a provenance
+  pair or a bare reference, tiers on demand; the stream carries references,
+  never payloads (INFO-027). The store behind it is runtime mechanics and
+  stays a comment (INFO-042).
 - **Agent members** — `children` holds the previous turn's spawn handles,
   REPL-bound (INFO-030); `events` is the agent's one channel (INFO-045),
   polled by the general event loop, never the REPL. The verbs stay free
   functions in the library; the attribute stubs only mark the boundary.
 - **done / status** — the poll predicate and the sync, non-blocking peek
-  (INFO-043); attribute read vs method is unpinned; the peek carries the
-  terminal's own shape, payload still empty.
+  (INFO-043). Pinned in the mockups README: the predicate reads as an
+  attribute — predicates read, actions ride CALL-shaped (INFO-042); the
+  peek carries the terminal's own shape, payload still empty.
 - **result** — await/settle (INFO-031).
 - **cancel** — the cancelled result is typed like any other (INFO-034).
 - **spawn** — the free verb takes the value acted on first: the parent
@@ -102,12 +111,13 @@ the shapes; the scenario files sketch turns against them.
   event loop dispatches it between this parent's own actions, never
   concurrently (INFO-033, INFO-039).
 - The callback runs in this REPL — its writes are REPL state.
-- A raising callback settles the parent's own boundary, not the child's
+- A raising callback settles — what, exactly, owns no record yet; recorded
+  as a known unknown in the mockups README.
+- The callback's pull is sync and paginated — the free `read` rehydrates
+  the pair's output side: settled values as data, never the stream
   (INFO-046).
-- The callback's pull is sync and paginated — the pair's output side,
-  rehydrated: settled values as data, never the stream (INFO-046).
 - scan / classify / rollup are an earlier turn's DELEGATE handles, left in
-  this REPL with `record` (INFO-009, INFO-045).
+  this REPL with `record` (INFO-049, INFO-045).
 - await blocks until terminal (INFO-031); the two joins are fork/join —
   fan out, run, join (INFO-009).
 - The straggler settles while the block is blocked in the awaits: the
@@ -125,9 +135,10 @@ the shapes; the scenario files sketch turns against them.
   returns child handles immediately, each with its own acceptance criterion.
 - The parent keeps working: one more sync tool call, blocks briefly; the
   full output persists as a content-addressed artifact.
-- Poll, don't await (INFO-013): a bounded poll with a sync pause between
+- Poll, don't await (INFO-032): a bounded poll with a sync pause between
   polls collects each child where ready; a settled `result()` returns at
-  once.
+  once. The sync pause blocks this REPL — a registered callback would
+  starve for the loop's duration; known unknown, mockups README.
 - Self-verify: failed and cancelled children share the shape — the failure
   names the unsettled indices (INFO-011).
 - The report tier is context-provided (INFO-003).
@@ -140,11 +151,12 @@ the shapes; the scenario files sketch turns against them.
   deferred unification, EVAL-001).
 - Same requirement and acceptance criteria; only the interaction style
   differs (INFO-003).
-- spawn takes no parent argument — parenthood is implicit, pids only
-  (INFO-014).
+- spawn takes no parent argument — parenthood is implicit, pids only, the
+  style's own framing; INFO-014 owns the parent staying alive while
+  children run.
 - The parent keeps working between receives — no await, status, or cancel.
-- One mailbox is one door: the operator door (INFO-017) is sender-matching,
-  no own home.
+- One mailbox is one door (INFO-017); sender-matching and no own home are
+  the style's own framing — the question channel itself is INFO-023's.
 - Replies carry payloads, not handles — the content-addressed store
   (INFO-006) sits outside the vocabulary.
 - Failure is shaped like success — same `.ok` / `.reason` / `.artifacts`

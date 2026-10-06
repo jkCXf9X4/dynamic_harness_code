@@ -15,7 +15,7 @@ async def turn_cancel_a_straggler(self : Agent):
 
     outcome = await hung.result()
     assert not outcome.ok and outcome.reason == "cancelled"
-    salvaged = outcome.artifacts[0]
+    salvaged = read(outcome.artifacts[0])
 
     failed = next(c for c, s in states.items() if s.done and not s.ok)
     crashed = await failed.result()
@@ -28,4 +28,4 @@ async def turn_cancel_a_straggler(self : Agent):
             or outcome.reason != "cancelled"):
         return self.fail("survivors unsettled or straggler uncancelled")
     return self.complete(headline=report.headline,
-                         artifacts=[[report.id, salvaged.id]])
+                         artifacts=[[salvaged.id, report.id]])

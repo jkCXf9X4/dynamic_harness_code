@@ -20,6 +20,6 @@ status: current
 ## Excludes
 - Where settled events execute — the parent's own REPL, never concurrently — `INFO-033`.
 - The settlement pattern this boundary serves — `INFO-046`.
-- The boundary log watching the stream from outside — `INFO-027`.
+- The boundary log watching the stream from outside — `INFO-049`.
 - The resolution machinery — loop-side polling, typed intake, settlement discipline — `INFO-048`.
 - The kernel commitment itself — the turn engine made real — stays with the execution-core contract, uncommitted: `INFO-037`.

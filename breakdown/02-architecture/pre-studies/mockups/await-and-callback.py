@@ -14,7 +14,7 @@ def record(ev : Event):
     global tail
     if not ev.ok:
         raise RuntimeError(f"{ev.child}: {ev.reason}")
-    tail = ev.artifacts[0].read(size=4_000)
+    tail = read(ev.artifacts[0], size=4_000)
 
 
 async def turn_join_and_settle(self : Agent):
@@ -34,4 +34,6 @@ async def turn_join_and_settle(self : Agent):
     settled = sum(r.ok for r in (r1, r2, r3))
     if settled < 3:
         return self.fail("children unsettled")
-    return self.complete(headline=out.headline, artifacts=[[out.id]])
+    return self.complete(headline=out.headline,
+                         artifacts=[[child, out.id] for r in (r1, r2, r3)
+                                    for _, child in r.artifacts])
