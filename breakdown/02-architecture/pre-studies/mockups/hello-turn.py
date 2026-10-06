@@ -8,25 +8,28 @@ acceptance, channels — INFO-029, INFO-003), makes one sync tool call,
 self-verifies the result — no FAIL lines in the capped output — reports.
 """
 
-from dhc.tools import bash    # concrete tools import per-run (INFO-007, INFO-044)
+from dhc.tools import bash  # concrete tools import per-run (INFO-007, INFO-044)
 
 
-async def turn_hello():
+async def turn_hello(self):
     # self is injected (INFO-029 draft) — the sketch of what it carries: _support.py
-    tid, req = self.id, self.requirement       # context off self (INFO-003)
 
-    out = self.tool(bash, f"pytest -q {tid}")   # sync; the ONE tool call —
-    hits = out.search("FAILED", limit=5)           # full output persists as
-    log = out.read(size=4_000)                     # an artifact; a handle back
+    out = self.tool(bash, "pytest -q")  # sync; the ONE tool call —
+    
+    hits = out.search("FAILED", limit=5)  # ranked hits; full output persists as
+    log = out.read(size=4_000)  # an artifact; a handle back
 
-    if hits:                              # failure = success shape
-        return self.fail(f"pytest failures: {', '.join(hits)}")           
+    art = self.publish(
+        headline=f"{self.id}: pytest result", summary=log, report=None
+    )  # the report tier rides
 
-    art = self.publish(headline=f"{tid}: pytest result",
-                       summary=log, report=None)    # the report tier rides
-    # tenant-less for now — the two-tier `text=` probe is recorded in
-    # mockups/README.md (INFO-006)
-    return self.complete(headline= "Job done", artifacts=[[art.id]])
+    if hits:  # failure = success shape
+        return self.fail(f"pytest failures: {', '.join(line for _, line in hits)}")
+
+    return self.complete(
+        headline=art.headline,  # uniform with the siblings —
+        artifacts=[[out.id, art.id]],
+    )  # provenance pair (INFO-027)
 
 
 # INFO-004 — a requirement too big for one call decomposes instead: the same
