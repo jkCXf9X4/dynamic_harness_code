@@ -5,7 +5,7 @@ summary: One agent's own action loop, verification, resilience, and persistent s
 
 # Own execution
 
-Use cases about a single agent in isolation: the turn-as-code loop, its
+How the harness runs a single agent in isolation: the turn-as-code loop, its
 persistent REPL and output history, and its resilience to failure.
 
 ## Owns

@@ -5,15 +5,15 @@ summary: Agents exchange work directly — sibling handoffs, direct messages, an
 
 # Peer exchange
 
-Use cases between agents at the same level, with no parent mediating the
-exchange.
+How the harness connects agents at the same level, with no parent mediating
+the exchange.
 
 ## Owns
 - Agent-to-agent behaviors outside a delegation edge.
 
 ## Excludes
 - Parent-mediated coordination — `delegation/`.
-- The artifact contract the handoffs rely on — `artifacts/`.
+- The artifact contract the handoffs rely on, which stays a public interface one layer up in Product.
 
 ## Contents
 

@@ -5,9 +5,10 @@ summary: A parent decomposes work, directs its children, and supervises them to 
 
 # Delegation
 
-Use cases whose actor is a parent agent and whose counterpart is a child:
-decomposition, fan-out, escalation, containment, synchronization, and the
-setup of multi-level organizations.
+How the harness organizes parent-to-child work: decomposition, fan-out,
+escalation, containment, synchronization, and the setup of multi-level
+organizations. The public-interface commitments these fulfill live one
+layer up in Product.
 
 ## Owns
 - Every parent-to-child behavior, including hierarchy setup.

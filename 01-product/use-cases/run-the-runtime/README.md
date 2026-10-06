@@ -13,7 +13,7 @@ or embed it behind an API.
 - Acting on the runtime as a unit.
 
 ## Excludes
-- What happens inside a running mesh — the other groups.
+- What happens inside a running mesh — the mesh-internal groups, organized one layer down in Architecture.
 
 ## Contents
 

@@ -12,7 +12,7 @@ findings, and tracing a failure through the records it leaves.
 - The artifact contract and its traceability.
 
 ## Excludes
-- The channels that carry artifact references — `delegation/`, `peers/`.
+- The channels that carry artifact references — delegation and peer exchange, organized one layer down in Architecture.
 
 ## Contents
 
