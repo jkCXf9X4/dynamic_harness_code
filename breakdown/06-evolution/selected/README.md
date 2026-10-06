@@ -17,6 +17,5 @@ schedule; adoption still runs through the change pipeline.
 ## Contents
 
 <!-- pb:index:start -->
-- **INFO-029** [Give agents an in-code capability surface](give-agents-an-in-code-capability-surface.md) — Agents act through one injected self object — async agent interaction, sync tool calls that return paginated artifact handles — so every use case is fulfilled by a call
-- [give-agents-an-in-code-capability-surface.verbs](give-agents-an-in-code-capability-surface.verbs.md)
+
 <!-- pb:index:end -->

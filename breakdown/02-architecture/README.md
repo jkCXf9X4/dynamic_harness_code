@@ -18,5 +18,5 @@ The organizing design: how the dhc runtime's parts fit and interact. Facts here 
 ## Contents
 
 <!-- pb:index:start -->
-- **EVAL-001** [Runtime architecture selection](runtime-architecture-selection.md) — Thirteen requirement groups from the use cases reject every single-shape candidate; the fit is the minimal execution core — kernel, artifact data plane, boundary event log — with parent-wired channels and one agent-facing surface
+
 <!-- pb:index:end -->
