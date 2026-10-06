@@ -19,7 +19,9 @@ How actors meet the dhc runtime: the action loop, delegation, artifacts, and the
 <!-- pb:index:start -->
 - [Artifacts](artifacts/README.md) — The durable, content-addressed medium agents publish, consume, and trace
 - [Capabilities and the primitive surface](capabilities/README.md) — Extending what agents can do, and the minimal execution-core contract behind it
+- [Communication](communication/README.md) — How messages travel after spawn — await, poll, callbacks, completion dispatch, cancel delivery, and settlement
 - [Operator use cases](operator/README.md) — The operator converses with, steers, and observes the mesh through the root and the TUI
 - [Peer exchange](peers/README.md) — Agents exchange work directly — sibling handoffs, direct messages, and shared rooms
+- [Relationship](relationship/README.md) — The delegation structure — who spawns whom, the fan-out shapes, hierarchy setup, liveness and supervision, and the cancellation contract
 - [Run the runtime](run-the-runtime/README.md) — Host, resume, and embed the runtime process as a whole, from outside the agent mesh
 <!-- pb:index:end -->

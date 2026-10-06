@@ -25,4 +25,5 @@ minimal primitive contract it commits to.
 - **INFO-038** [Run each agent in its own thread or process](run-each-agent-in-its-own-thread-or-process.md) — Every agent executes in its own thread-or-process unit, isolated from the runtime process and from every other agent
 - **INFO-041** [Keep the code interface public and decoupled](keep-the-code-interface-public-and-decoupled.md) — The in-code capability surface counts as public interface, so it stays decoupled from the harness and can be developed as a separate entity
 - **INFO-044** [Incorporate external tools from the Python ecosystem](incorporate-external-tools-from-the-python-ecosystem.md) — Agents and users load RAG, web search, and memory packages themselves, so the harness stays a substrate while the ecosystem moves
+- **INFO-045** [Resolve the event stream outside run_code](resolve-the-event-stream-outside-run-code.md) — The stream's intake is typed to the terminal — one settled child = one Event, a frozen Result — and the general event loop resolves it outside run_code; the REPL receives settled values and never drains or polls the stream
 <!-- pb:index:end -->
