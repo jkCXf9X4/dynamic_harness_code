@@ -25,4 +25,7 @@ persistent REPL and output history, and its resilience to failure.
 - **INFO-030** [Give each agent a persistent REPL](give-each-agent-a-persistent-repl.md) — Each agent works in a persistent REPL of its own — state persists across actions, agent-developed tools live in it, and it is the agent's workspace rather than the run's
 - **INFO-035** [Keep an output history distinct from REPL state](keep-an-output-history-distinct-from-repl-state.md) — Explicitly returned outputs are retained as a queryable history, separate from the agent's working variables
 - **INFO-036** [Isolate each child's REPL and pass context explicitly](isolate-each-child-s-repl-and-pass-context-explicitly.md) — Each child works in its own REPL; the parent passes explicit inputs, and nothing of the parent's namespace is shared implicitly
+- **INFO-037** [Commit to a minimal execution-core contract](commit-to-a-minimal-execution-core-contract.md) — The execution behaviors lack a committed minimal contract; candidate: persistent REPL, non-blocking delegate, await/poll/callback/cancel, with observability at boundaries only
+- **INFO-038** [Run each agent in its own thread or process](run-each-agent-in-its-own-thread-or-process.md) — Every agent executes in its own thread-or-process unit, isolated from the runtime process and from every other agent
+- [commit-to-a-minimal-execution-core-contract.analysis](commit-to-a-minimal-execution-core-contract.analysis.md)
 <!-- pb:index:end -->

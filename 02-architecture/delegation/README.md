@@ -33,4 +33,6 @@ layer up in Product.
 - **INFO-032** [Poll a child without blocking](poll-a-child-without-blocking.md) — A parent inspects a child's lifecycle state on demand — pending, running, completed, failed, cancelled, timeout — without synchronizing
 - **INFO-033** [Run completion callbacks in the parent](run-completion-callbacks-in-the-parent.md) — A parent can register a callback that runs in its own REPL when a child settles — success or failure — never concurrently with parent code
 - **INFO-034** [Cancel a running child](cancel-a-running-child.md) — A parent can cancel a child it no longer needs; the child settles as cancelled and the outcome surfaces like any terminal state
+- **INFO-039** [Schedule child completions between parent actions](schedule-child-completions-between-parent-actions.md) — Child completions reach the parent as events and the parent's runtime dispatches callbacks between the parent's own actions
+- **INFO-040** [Stop a cancelled child's worker](stop-a-cancelled-child-s-worker.md) — A parent's cancel request terminates the child's worker, and the child settles as cancelled with its partial work discarded
 <!-- pb:index:end -->

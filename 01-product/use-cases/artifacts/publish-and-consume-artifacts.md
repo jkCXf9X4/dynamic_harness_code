@@ -13,6 +13,10 @@ status: current
 - Parents receive summaries plus artifact IDs; consumers pull headline → summary → report tiers on demand.
 - Working state lives in the agent's persistent REPL between actions; artifacts remain the durable medium for findings that cross agents or must outlive them (`INFO-030`).
 
+## Motivation
+
+Part of the public code interface
+
 ## Owns
 - The artifact-driven communication and progressive-disclosure contract.
 

@@ -2,27 +2,7 @@
 
 > Incorporated 2026-10-06 as the source analysis for `INFO-030` … `INFO-037`.
 
-## 1. Design Model
-
-The harness exposes a stateful computational environment to the agent.
-
-The agent has access to:
-
-* `call-code` — execute arbitrary code in a persistent REPL.
-* `delegate` — start asynchronous child-agent work.
-* `await` — wait for a child to complete.
-* `status` — inspect a child without waiting.
-* `on_done` — register a callback for child completion.
-
-The harness treats the code runtime as a **black box**.
-
-Traceability is provided at the `call-code` and delegation boundaries rather than by instrumenting the code executed inside the REPL.
-
-The core principle is:
-
-> Give the agent a highly expressive action space while making the boundaries between agent, execution, and child work observable and attributable.
-
----
+The design model and the recommended minimal contract live one layer up in Architecture (`INFO-042`, `INFO-043`) — they are organizing design, not use cases.
 
 # 2. REPL Use Cases
 
@@ -636,75 +616,3 @@ cancelled
 
 and its completion event records the cancellation outcome.
 
----
-
-# 8. Recommended Minimal Harness Contract
-
-The entire model can remain surprisingly small:
-
-```python
-# Stateful execution
-call_code(code)
-
-# Asynchronous execution
-task = delegate(task, inputs=None, on_done=None)
-
-# Synchronization
-result = await task
-
-# Non-blocking observation
-task.status()
-task.done()
-
-# Optional control
-task.cancel()
-```
-
-With four fundamental concepts:
-
-```text
-REPL state
-    persistent computational workspace
-
-Call
-    synchronous black-box execution boundary
-
-Task
-    asynchronous child execution
-
-Event
-    externally observable lifecycle transition
-```
-
-And the trace consists primarily of:
-
-```text
-CALL
-  input → output
-
-DELEGATE
-  task → input
-
-COMPLETE
-  task → output
-
-AWAIT
-  task → synchronization point
-
-CALLBACK
-  task → callback execution
-```
-
-The most important architectural property is that **the harness understands the lifecycle and boundaries, but not the internals of the code being executed**.
-
-That gives the agent a very large action space while retaining enough structure to answer:
-
-1. What did the agent ask the runtime to do?
-2. What did the runtime return?
-3. What child work was spawned?
-4. Which parent spawned it?
-5. When did it complete or fail?
-6. When did the parent observe/synchronize on it?
-7. Which state and results were available at each point?
-
-That is enough to build a powerful agent harness without turning the harness into an instrumented programming-language runtime.
