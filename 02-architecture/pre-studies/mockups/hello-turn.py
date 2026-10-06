@@ -13,10 +13,9 @@ from dhc.tools import bash
 
 
 async def turn_hello():
+    # self is injected (INFO-029 draft) — the sketch of what it carries: _support.py
     tid, req = self.id, self.requirement       # context off self (INFO-003)
 
-    # TODO: lets make it more open for what can be done but keep some traceability for debugging and context rot 
-    # Suggested change self.tool(shell, f"pytest -q {tid}") where shell is the function call and args and kwargs are passed to it 
     out = self.tool(bash, f"pytest -q {tid}")   # sync; the ONE tool call —
     hits = out.search("FAILED", limit=5)           # full output persists as
     log = out.read(size=4_000)                     # an artifact; a handle back

@@ -55,6 +55,16 @@ The other three mockups adopt the same patterns — `tool` callable-first,
 result-side `verify`, typed `complete`; the contrast keeps the actor style
 untouched.
 
+## The complement
+
+`_support.py` sketches the shapes the turns read against — the injected
+`self` (`Agent`: id, requirement, acceptance, channels, plus the verb
+dispatch stubs), the result-side `ToolOutput` (`search`/`read`/`verify`),
+and the typed terminals (`Verdict`, `Turn` — `fail` uniform with
+`complete`). Runtime mechanics — persist-before-execute, the boundary log,
+the artifact store — stay comments. It excludes the contract and the
+surface themselves: INFO-043 and INFO-029 both still draft.
+
 ## Owns
 
 - The mockup set: one scenario per file, each citing the use cases it exercises and the unknowns it probes.
