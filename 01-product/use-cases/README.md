@@ -39,5 +39,9 @@ How actors meet the dhc runtime: the action loop, delegation, artifacts, and the
 - **INFO-021** [Detect context rot in an agent's output](detect-context-rot-in-an-agent-s-output.md) — The runtime detects degradation signatures such as repeating loops and gibberish in an agent's output stream and surfaces them to the parent
 - **INFO-022** [Chat continuously while subagents run](chat-continuously-while-subagents-run.md) — Operator messages keep flowing while subagents run, and a message sent mid-turn steers the root's current turn immediately
 - **INFO-023** [Ask the operator a question](ask-the-operator-a-question.md) — Any agent can ask the operator a question; the question routes up the parent chain and the answer returns to the asking agent
-- **INFO-028** [Drive the TUI from persistent files](drive-the-tui-from-persistent-files.md) — The operator's TUI is a minimal chat whose content and layout are read from persistent files rather than hardcoded into the interface
+- **INFO-024** [Resume an interrupted run from persisted state](resume-an-interrupted-run-from-persisted-state.md) — A dead runtime process loses every running hierarchy; candidate: per-agent checkpoints and a resume that rebuilds the run from persisted state
+- **INFO-025** [Embed the runtime in a host process behind an API](embed-the-runtime-in-a-host-process-behind-an-api.md) — A host application can construct and drive the runtime through a committed API surface, decoupling the harness from any UI
+- **INFO-026** [Compress a running agent's context](compress-a-running-agent-s-context.md) — Collapse accumulated context into a summary that leans on persisted artifacts, the committed remedy for detected context rot short of re-decomposition
+- **INFO-027** [Trace a failure to its provenance without re-running](trace-a-failure-to-its-provenance-without-re-running.md) — A queryable trail tying each agent to its actions and artifacts, so a failure is diagnosed by reading records only
+- **INFO-028** [Minimalistic UI/TUI](drive-the-tui-from-persistent-files.md) — The operator's TUI is a minimal chat whose content and layout
 <!-- pb:index:end -->
