@@ -17,5 +17,5 @@ status: current
 - The container-hosting security and deployment boundary.
 
 ## Excludes
-- Per-action subprocess isolation, the inner boundary — `INFO-002`.
+- Per-action execution isolation, the inner boundary — `INFO-002`.
 - Agent tool extensions hosted by the runtime — `INFO-007`.

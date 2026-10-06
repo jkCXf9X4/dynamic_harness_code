@@ -10,7 +10,7 @@ status: current
 # Broadcast one requirement to many children
 
 - For a complex problem where the right approach is unknowable up front, a parent spawns many children with the same requirement, differing only in one parameter (`INFO-004`).
-- All children run in parallel, each contained in its own thread (`INFO-005`).
+- All children run in parallel and are contained individually (`INFO-005`).
 - Every child answers point-to-point with a summary plus artifact IDs (`INFO-006`); the parent picks among the returned results — an ensemble or parallel probe.
 - The probe is exploratory: the parent commits to a direction only after seeing the results, probe-sense-respond.
 

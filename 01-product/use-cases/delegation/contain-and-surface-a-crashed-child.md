@@ -2,7 +2,7 @@
 id: INFO-005
 type: info
 title: Contain and surface a crashed child
-summary: A crashed child stays contained in its own thread and surfaces as a failed result to its parent
+summary: A crashed child is contained and never takes down siblings or the parent; it surfaces as a failed result
 date: 2026-10-05
 status: current
 ---

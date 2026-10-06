@@ -20,4 +20,4 @@ status: current
 
 ## Excludes
 - How the block verifies itself — `INFO-003`.
-- The hosting boundary the subprocess runs inside — `INFO-008`.
+- The hosting boundary execution runs inside — `INFO-008`.

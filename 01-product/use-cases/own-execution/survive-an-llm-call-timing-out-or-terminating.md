@@ -10,7 +10,7 @@ status: current
 # Survive an LLM call timing out or terminating
 
 - Every agent turn depends on an LLM call, and an LLM call can time out or terminate without returning a completion.
-- A timed-out or terminated LLM call is contained: the agent's thread survives and never hangs or takes down the agent (`INFO-001`).
+- A timed-out or terminated LLM call is contained to the turn: the agent survives and keeps running (`INFO-001`).
 - The failure surfaces as a failed result for the turn, indistinguishable in shape from a success (`INFO-005`).
 - The parent treats it like any other failed result and may re-decompose or escalate (`INFO-011`).
 

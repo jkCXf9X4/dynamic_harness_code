@@ -2,7 +2,7 @@
 id: INFO-028
 type: info
 title: Minimalistic UI/TUI 
-summary: The operator's TUI is a minimal chat whose content and layout
+summary: The operator's TUI is a minimal chat whose content and layout come from persistent files
 date: 2026-10-05
 status: current
 ---
