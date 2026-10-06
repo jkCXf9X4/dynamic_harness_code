@@ -31,9 +31,11 @@ async def turn_cancel_a_straggler():
     assert not crashed.ok and crashed.reason != "cancelled"
 
     report = publish(self, headline="2 settled, 1 cancelled, 1 failed",
-                     summary="straggler killed; survivors in the report")
-    verify(self, against=self.acceptance,       # INFO-003 — value-first: the
-           results=[outcome, crashed])          # block's self-verify, last
-                                                # action before it settles
+                     summary="straggler killed; survivors in the report",
+                     report=None)     # the criterion is the evidence itself —
+                                      # the report tier rides tenant-less
+    if (sum(s.ok for s in states.values()) != 2    # authored in-block
+            or outcome.reason != "cancelled"):     # (INFO-003) — the criterion
+        return fail(self, "survivors unsettled or straggler uncancelled")
     return complete(self, headline=report.headline,
                     artifacts=[[report.id, salvaged.id]])

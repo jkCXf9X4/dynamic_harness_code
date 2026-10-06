@@ -16,24 +16,28 @@ mockup — which of two surfaces reads better for the same scenario.
 
 | Mockup | Scenario | Verdict |
 |---|---|---|
-| `hello-turn.py` | the base loop — `INFO-002`, `INFO-003`, `INFO-004` | **adopted** — open `tool`, result-side `verify`, typed `complete` |
-| `fan-out-research.py` | fan-out + poll — `INFO-009`, `INFO-013` | **adopted** — open `tool` (callable-first), typed `complete`; the ready-sweep stands in for `verify` |
-| `await-and-callback.py` | await + callback — `INFO-031`, `INFO-033`, `INFO-039` | **adopted** — `verify(against=...)`, typed `complete`; `drain(agent)` still a candidate |
-| `cancel-a-straggler.py` | cancel — `INFO-034`, `INFO-040`, `INFO-005` | **adopted** — `verify(against=...)` + typed `complete`; `cancel(task, reason=...)` stays a candidate, already verb-form |
+| `hello-turn.py` | the base loop — `INFO-002`, `INFO-003`, `INFO-004` | **adopted** — open `tool`, the check is the branch — evidence-only for now, typed `complete` |
+| `fan-out-research.py` | fan-out + poll — `INFO-009`, `INFO-013` | **adopted** — open `tool` (callable-first), typed `complete`; the ready-sweep is the authored check |
+| `await-and-callback.py` | await + callback — `INFO-031`, `INFO-033`, `INFO-039` | **adopted** — the check is the branch, typed `complete`; `drain(agent)` still a candidate |
+| `cancel-a-straggler.py` | cancel — `INFO-034`, `INFO-040`, `INFO-005` | **adopted** — the check is the branch + typed `complete`; `cancel(task, reason=...)` stays a candidate, already verb-form |
 | `fan-out-research.actor.py` | contrast: actor style for the same scenario — `INFO-037` | task-handle surface reads better |
 
 ## What the verdicts answer
 
-- **`verify` — adopted**: receiver-style on the result, criteria from the
-  injected context (`out.verify(against=...)`); three mockups carry it —
-  the base loop adopted it, the join verifies its result, the straggler
-  self-verifies with it.
-- **`tool` — adopted in open form**: the callable comes first, args and
-  kwargs pass through (`tool(self, bash, f"pytest -q {tid}")`), so the surface
-  stays open for what can be done while the trace stays boundary-side —
-  persist-before-execute plus the boundary log keep it answerable
-  (`INFO-021`, `INFO-027`); concrete tools import per-run from `dhc.tools`
-  (`from dhc.tools import bash` — `INFO-007`, `INFO-044`).
+- **`verify` — scrapped; `Verdict` with it**: one verb couldn't own
+  checking — different criteria are fulfilled in different ways. The
+  responsibility is the block's: authored in-block, the check is the
+  branch, the reason is the block's formatted string (INFO-003) —
+  the base loop carries its branch, the join checks the tally, the
+  straggler composes its evidence. Recorded here, never scrapped
+  silently; neither was ever inventoried (`…verbs.md`).
+- **`tool` — adopted**: the callable comes first, args and kwargs pass
+  through (`self.tool(bash, f"pytest -q {tid}")`) — the boundary's calls ride
+  the Agent's stubs, CALL-shaped (INFO-042); the library's `tool` stays
+  open-form for new verbs, callable-first (INFO-029). The trace stays
+  boundary-side — persist-before-execute plus the boundary log keep it
+  answerable (`INFO-021`, `INFO-027`); concrete tools import per-run from
+  `dhc.tools` (`from dhc.tools import bash` — `INFO-007`, `INFO-044`).
 - **`search` / `match` / `read` — confirmed** as written: ranked hits,
   exact spans, size-capped pull; attribute syntax dispatches through the
   verb library.
@@ -52,18 +56,21 @@ mockup — which of two surfaces reads better for the same scenario.
   `INFO-043`'s five-verb set.
 
 The other three mockups adopt the same patterns — `tool` callable-first,
-result-side `verify`, typed `complete`; the contrast keeps the actor style
+in-block checks, typed `complete`; the contrast keeps the actor style
 untouched.
 
 ## The complement
 
 `_support.py` sketches the shapes the turns read against — the injected
 `self` (`Agent`: id, requirement, acceptance, channels, plus the verb
-dispatch stubs), the result-side `ToolOutput` (`search`/`read`/`verify`),
-and the typed terminals (`Verdict`, `Turn` — `fail` uniform with
-`complete`). Runtime mechanics — persist-before-execute, the boundary log,
+dispatch stubs), the result-side `ToolOutput` (`search`/`read`),
+and the typed terminals (`Turn` — `fail` uniform with `complete`,
+plain fields now). Runtime mechanics — persist-before-execute, the boundary log,
 the artifact store — stay comments. It excludes the contract and the
-surface themselves: INFO-043 and INFO-029 both still draft.
+surface themselves: INFO-043 and INFO-029 both still draft. The tier
+question rides with them: the base loop's two-tier `publish` probe
+(`text=`) is recorded here — the report tier tenant-less, the tail-read's
+offset dropped with it; pagination's shape stays unpinned.
 
 ## Owns
 

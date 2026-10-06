@@ -1,5 +1,7 @@
 # Harness Use Cases
 
+Guidelines not rules when it comes to code 
+
 > Incorporated 2026-10-06 as the source analysis for `INFO-030` … `INFO-037`.
 
 The design model and the recommended minimal contract live one layer up in Architecture (`INFO-042`, `INFO-043`) — they are organizing design, not use cases.

@@ -1,4 +1,6 @@
 ---
+### DEPRICATED ###
+
 id: INFO-029
 type: info
 title: Give agents an in-code capability surface

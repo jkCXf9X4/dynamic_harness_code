@@ -1,10 +1,11 @@
 """Complement to the scenario mockups — the shapes the turns read against.
 
 Sketches, not the surface: the injected `self` (INFO-029 draft) and the
-result-side `ToolOutput` the verdicts answer, plus the typed terminals
-`fail`/`complete` share. Runtime mechanics stay comments, per INFO-042 —
-persist-before-execute, the boundary log, and the artifact store are the
-harness's, not sketched here.
+result-side `ToolOutput`, plus the typed terminals `fail`/`complete` share.
+The checks are the blocks' own — authored in-block per criterion (INFO-003):
+the check is the branch, the reason is the block's formatted string. Runtime
+mechanics stay comments, per INFO-042 — persist-before-execute, the boundary
+log, and the artifact store are the harness's, not sketched here.
 """
 
 from __future__ import annotations
@@ -28,24 +29,12 @@ class Artifact:
 
 
 @dataclass(frozen=True)
-class Verdict:
-    """The in-block self-verify's typed answer (INFO-003).
-
-    `headline` is pinned here — the mockups read it; the access name stays
-    in mockups/README.md's unpinned list.
-    """
-    ok: bool
-    reason: str = ""
-    headline: str = ""
-
-
-@dataclass(frozen=True)
-class Turn:
+class Result:
     """Typed terminal — `fail`'s shape uniform with `complete`'s."""
     ok: bool
     headline: str = ""
-    artifacts: tuple = ()   # provenance pairs, by reference (INFO-027, unpinned)
     reason: str = ""
+    artifacts: tuple = ()   # provenance pairs, by reference (INFO-027, unpinned)
 
 
 @dataclass(frozen=True)
@@ -64,17 +53,9 @@ class ToolOutput:
                 if pattern in line]
         return hits[:limit]
 
-    def read(self, size: int = 4_000) -> str:
+    def read(self, size: int = 4_000, offset=0) -> str:
         """Size-capped pull of the report tier."""
-        return self.text[:size]
-
-    def verify(self, against) -> Verdict:
-        """Agent-authored in-block check — a naive substring stand-in."""
-        missing = [c for c in against if c not in self.text]
-        if missing:
-            return Verdict(ok=False, reason=f"unmet: {', '.join(missing)}",
-                           headline=f"{len(missing)} criterion(s) unmet")
-        return Verdict(ok=True, headline="acceptance met")
+        return self.text[offset:size]
 
 
 @dataclass(frozen=True)
@@ -101,13 +82,26 @@ class Agent:
 
     def fail(self, reason: str) -> Turn:
         """Failure = success shape."""
-        return Turn(ok=False, reason=reason)
+        return Result(ok=False, reason=reason)
 
     def complete(self, headline: str, artifacts=()) -> Turn:
-        return Turn(ok=True, headline=headline, artifacts=tuple(artifacts))
+        return Result(ok=True, headline=headline, artifacts=tuple(artifacts))
 
 
 def bash(cmd: str) -> str:
-    """Stand-in for `dhc.tools.bash` — fabricates the run's pytest tail."""
+    """Stand-in for `dhc.tools.bash` — fabricates the run's pytest tail.
+
+    Long enough that the tail-read at offset 300 lands inside the warnings
+    summary — the pagination gesture reads something.
+    """
     tid = cmd.split()[-1]
-    return f"================= {tid} =================\n1 passed in 0.02s\n"
+    return (f"================= {tid} =================\n"
+            "1 passed in 0.02s\n\n"
+            "warnings summary:\n"
+            "hello_turn.py::turn_hello\n"
+            "  the boundary log is runtime mechanics — persist-before-execute,\n"
+            "  the artifact store, and the boundary log itself stay comments\n"
+            "  (INFO-042); the persisted block executes against the persistent\n"
+            "  REPL after this pull\n"
+            "  40 warnings in 0.31s\n"
+            "1 warning in 0.31s\n")

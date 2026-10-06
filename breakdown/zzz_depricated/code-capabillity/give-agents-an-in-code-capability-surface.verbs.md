@@ -1,3 +1,5 @@
+### DEPRICATED ###
+
 # Verb inventory — discussion material for INFO-029
 
 Initial list of the surface's function calls, from
