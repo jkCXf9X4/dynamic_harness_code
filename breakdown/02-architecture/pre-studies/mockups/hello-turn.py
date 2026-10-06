@@ -8,10 +8,14 @@ acceptance, channels — INFO-029, INFO-003), makes one sync tool call,
 self-verifies the result — no FAIL lines in the capped output — reports.
 """
 
-from dhc.tools import bash  # concrete tools import per-run (INFO-007, INFO-044)
+from _support import *
+
+from dhc import *    # Worker is a spec value, not a built-in (INFO-007)
+from dhc.tools import bash    # concrete tools import per-run (INFO-007, INFO-044)
 
 
-async def turn_hello(self):
+
+async def turn_hello(self : Agent):
     # self is injected (INFO-029 draft) — the sketch of what it carries: _support.py
 
     out = self.tool(bash, "pytest -q")  # sync; the ONE tool call —

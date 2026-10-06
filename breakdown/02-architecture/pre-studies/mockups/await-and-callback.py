@@ -4,15 +4,17 @@ the runtime persists it, then executes it in this parent's REPL (INFO-002,
 INFO-043); one function below is one block body — comments cite INFO-IDs.
 """
 
-from dhc import *    # the task verbs stay free, task-first (INFO-029) —
-                     # the boundary verbs ride self's stubs, CALL-shaped (INFO-042)
+from _support import *
+
+from dhc import *    # Worker is a spec value, not a built-in (INFO-007)
+from dhc.tools import bash    # concrete tools import per-run (INFO-007, INFO-044)
 
 
-async def turn_join_and_drain():
+async def turn_join_and_drain(self : Agent):
     # scan / classify / rollup: handles an earlier turn's DELEGATE (INFO-009)
     # left in this REPL; rollup was spawned there with on_done=record —
     # the callback registration shape is unpinned (INFO-033)
-    
+
     scan, classify, rollup = self.children
 
     r1 = await scan.result()       # AWAIT: block until terminal (INFO-031)

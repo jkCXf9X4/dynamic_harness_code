@@ -5,17 +5,18 @@ the free verb takes the value acted on first — spawn's first arg is the
 parent; the children's verbs ride their handles (INFO-042).
 """
 
+from _support import *
+
 from dhc import *    # Worker is a spec value, not a built-in (INFO-007)
 from dhc.tools import bash    # concrete tools import per-run (INFO-007, INFO-044)
 
 import time    # the sync pause between polls (INFO-013)
 
 
-async def turn_fan_out_research():
+async def turn_fan_out_research(self : Agent):
     # INFO-009 / INFO-013 — one requirement broadcast to four children; spawn
     # returns child handles immediately, with per-child acceptance criteria.
-    children = [spawn(self, Worker, requirement=self.requirement,
-                      acceptance=crit) for crit in self.acceptance]
+    children = [self.spawn(requirement=self.requirement, acceptance=crit) for crit in self.acceptance]
 
     # The parent keeps working: one more sync tool call (INFO-002) — the
     # callable comes first (INFO-029); blocks briefly; the full output

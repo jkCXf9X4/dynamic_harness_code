@@ -9,8 +9,14 @@ and result ride their handles, cancel takes reason=; the free verbs they'd
 extend stay INFO-029's convention, never invented silently.
 """
 
+from _support import *
 
-async def turn_cancel_a_straggler():
+from dhc import *    # Worker is a spec value, not a built-in (INFO-007)
+from dhc.tools import bash    # concrete tools import per-run (INFO-007, INFO-044)
+
+
+
+async def turn_cancel_a_straggler(self : Agent):
     # `children` is REPL-bound — the previous turn's spawns (INFO-030):
     # Agent handles, the verbs they carry ride CALL-shaped (INFO-042)
     states = {c: c.status() for c in self.children}    # sync, non-blocking (INFO-043)
