@@ -1,26 +1,27 @@
 ---
-id: INFO-030
+id: INFO-050
 type: info
-title: Give each agent a persistent REPL
-summary: Every agent works in a persistent REPL of its own — state persists across actions, context passes explicitly at delegation boundaries, and nothing is shared implicitly
+title: The agent REPL
+summary: Every agent works in a persistent REPL of its own — a private computational workspace whose state survives across actions, that all of the agent's code executes in and never concurrently, and that nothing crosses except explicit context in and explicit results out
 date: 2026-10-06
 status: current
 ---
 
-# Give each agent a persistent REPL
+# The agent REPL
 
-- The agent's REPL is its persistent computational workspace: variables, functions, imports, and loaded tools survive from one action to the next (`INFO-002`).
+- The REPL is the agent's persistent computational workspace: variables, functions, imports, and loaded tools survive from one action to the next (`INFO-002`).
 - Expensive intermediates stay live — embeddings, dataframes, and compiled helpers are computed once and reused instead of recomputed per action.
 - Agent-generated knowledge accumulates in the workspace: notes, helpers, and partial results the agent builds up stay addressable by later actions.
 - Agent-developed tools live in the agent's REPL, not in harness-provided infrastructure — a capability the agent adds persists with the agent it belongs to (`INFO-007`).
 - The REPL is the agent's workspace, not the run's: agent and tools are decoupled from the harness lifecycle instead of bound to one run.
 - State remains available until the agent is explicitly reset or reaches a configured resource boundary.
+- All of an agent's code executes in that agent's own REPL, never concurrently: worker actions run there, and so do the completion callbacks the agent registers (`INFO-002`, `INFO-033`).
 - Every delegated child works in a REPL of its own; siblings' variables cannot collide, and neither child nor parent can accidentally mutate another's workspace.
 - The parent transfers context explicitly: inputs passed on delegation become the child's defined input context — nothing more is visible.
 - The child returns results — a summary plus artifact IDs — to the parent; a child's REPL is never merged into the parent's, and any value the parent wants must be explicitly retained (`INFO-004`).
 
 ## Owns
-- The per-agent persistent-REPL contract: a private workspace per agent — parent or delegated child — its lifetime, what survives across actions, explicit context in and explicit results out at the delegation boundary, and what bounds it.
+- The per-agent REPL contract: a private, persistent computational workspace per agent — parent or delegated child — what survives across actions, its lifetime and bounds, explicit context in and explicit results out at the delegation boundary, and its role as the single execution context for all of that agent's code.
 
 ## Excludes
 - The turn-as-code action contract that executes against it — `INFO-002`.
@@ -28,3 +29,5 @@ status: current
 - The artifact store that holds durable, cross-agent state — `INFO-006`.
 - The agent-developed-tools extension contract the workspace carries — `INFO-007`.
 - Artifact hand-off between siblings, which routes published artifacts without shared state — `INFO-012`.
+- The completion-callback contract that runs inside it — `INFO-033`.
+- The event stream the REPL's pull primitives never touch — `INFO-051`.

@@ -11,7 +11,7 @@ status: current
 
 - Every agent — root, middle, or worker — runs in its own thread or process, separate from the runtime process and from every other agent.
 - A crash or hang takes down the agent's thread-or-process unit only; the runtime process survives (`INFO-005`).
-- Per-agent persistent REPLs (`INFO-030`) and per-action execution isolation ride on this placement.
+- Per-agent persistent REPLs (`INFO-050`) and per-action execution isolation ride on this placement.
 
 ## Owns
 - The agent concurrency-placement design: one thread-or-process execution unit per agent, isolated from the runtime and from every other agent.
@@ -19,4 +19,4 @@ status: current
 ## Excludes
 - The crash-containment contract this placement delivers — `INFO-005`.
 - The container security boundary around all agents — `INFO-008`.
-- The child-REPL isolation contract instance this places — `INFO-030`.
+- The child-REPL isolation contract instance this places — `INFO-050`.

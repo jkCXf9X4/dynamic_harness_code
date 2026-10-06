@@ -11,7 +11,7 @@ status: current
 
 - Every agent turn emits one Python block as its whole action (`INFO-001`).
 - The runtime persists the block as an immutable, content-addressed artifact before execution.
-- The block executes against the agent's persistent REPL (`INFO-030`).
+- The block executes against the agent's persistent REPL (`INFO-050`).
 - The action's result returns to the caller as a summary plus artifact IDs, not raw logs.
 - One expressive block replaces N tool-call turns: loops, fan-out, transforms, and error handling happen inside the action.
 

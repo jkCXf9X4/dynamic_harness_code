@@ -12,7 +12,7 @@ status: current
 - Agents extend the capability surface themselves, outside the harness release cycle (`INFO-001`).
 - The harness is a substrate, not a tool set: capabilities arrive as artifacts and code, not built-ins.
 - Harness plumbing stays runtime-owned and invisible — instrumentation is never agent-authored.
-- Loaded tools persist in the agent's own REPL, so a capability the agent adds stays available (`INFO-030`).
+- Loaded tools persist in the agent's own REPL, so a capability the agent adds stays available (`INFO-050`).
 
 ## Owns
 - The agent-developed-tools extension contract.
