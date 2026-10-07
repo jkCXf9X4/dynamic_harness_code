@@ -257,6 +257,20 @@ class ReplEngine:
             )
         return self._result_from(workspace)
 
+    def inject_nolock(self, agent_id: str, namespace: dict) -> None:
+        """Merge *namespace* into the workspace WITHOUT the per-agent lock.
+
+        Reentrant companion to :meth:`inject`: safe to call from inside an
+        advance (the pump already holds the per-agent lock during a step),
+        mirroring :meth:`run_block`'s reentrancy. Used by the fabrication
+        kit's ``run_block`` to refresh the in-code surface between nested
+        execs.
+        """
+        with self._dict_lock:
+            workspace = self._workspaces.get(agent_id)
+        if workspace is not None:
+            workspace.update(namespace)
+
     def reset(self, agent_id: str) -> None:
         """Drop the agent's workspace and lock; the next execute starts fresh.
 

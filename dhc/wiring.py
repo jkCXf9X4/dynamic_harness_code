@@ -45,6 +45,7 @@ from .config import get_settings
 from .driver import MockDriver, driver_from_settings
 from .errors import ChannelError, TurnError, TurnTimeoutError
 from .event_stream import CompletionDispatcher, EventBus
+from .fabrication import fabrication_kit
 from .models import Artifact, Event, EventKind, Message
 from .operator import Operator
 from .repl import ReplEngine
@@ -317,6 +318,13 @@ def _extend_namespace(
         ns = original(agent)
         ns["MockDriver"] = MockDriver
         ns["driver_from_settings"] = driver_from_settings
+        # IMP-001 Step 2: the fabrication kit (default __runner + decide +
+        # context + helpers) is injected into every agent's namespace. The
+        # kit is installable and testable WITHOUT the pump (Step 3 rewrites
+        # runtime.py): the default __runner is a workspace-citizen generator
+        # that tests can drive directly through ReplEngine.advance.
+        kit = fabrication_kit(runtime, runtime.repl_engine, agent)
+        ns.update(kit)
         return ns
 
     runtime._build_namespace = build  # type: ignore[method-assign]
@@ -368,10 +376,15 @@ def build_runtime(
         artifact_store=store_adapter,
         settings=settings,
     )
+    raw_engine = ReplEngine()
     engine = _ReplEngineAdapter(
-        ReplEngine(), resolve_agent=runtime._agents.__getitem__
+        raw_engine, resolve_agent=runtime._agents.__getitem__
     )
     runtime.engine = engine
+    # IMP-001 Step 2: expose the raw ReplEngine so the fabrication kit (and
+    # tests driving the default __runner) can use install/advance/run_block
+    # directly — the kit is installable and testable WITHOUT the pump.
+    runtime.repl_engine = raw_engine
 
     messenger = Messenger(bus, registry=runtime._agents, sink=sink)
     rooms = RoomManager(bus, sink=sink)
