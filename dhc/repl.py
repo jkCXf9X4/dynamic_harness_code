@@ -10,13 +10,46 @@ returned as a failed :class:`~dhc.models.Result` and the workspace is
 preserved. A turn that exceeds its timeout is contained (INFO-020): it returns
 a failed result without hanging, and the workspace is rolled back to a snapshot
 taken at turn start so a still-running worker thread can never corrupt it.
+
+Resumable-run primitives (IMP-001 Step 1): an agent may also install a
+resumable generator as its ``__runner`` and advance it one yield-window (one
+step) at a time via :meth:`ReplEngine.advance`. Each timed advance snapshots
+the workspace; on timeout the step is rolled back and the generator is
+abandoned (never resumed). ``run_block`` provides non-locking nested exec so a
+generator step can run code against the workspace without deadlocking on the
+per-agent lock.
 """
 
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
+from typing import Any
 
 from .models import Result
+
+
+@dataclass(frozen=True)
+class AdvanceOutcome:
+    """Outcome of one :meth:`ReplEngine.advance` call.
+
+    ``kind`` is one of:
+
+    - ``"yield"`` — the runner yielded ``value`` and remains active.
+    - ``"finished"`` — the runner raised StopIteration; it is done.
+    - ``"timeout"`` — the step exceeded its timeout; the runner was abandoned
+      and the workspace was rolled back to the per-advance snapshot.
+    - ``"error"`` — the step raised; the runner is finished (a generator that
+      raised cannot be resumed) and the workspace is preserved (INFO-005).
+    - ``"suspended"`` — the runner is parked; advance did not run it.
+    - ``"abandoned"`` — the runner was previously abandoned (timeout or kill);
+      it is never resumed.
+    - ``"not_installed"`` — no runner is installed for the agent.
+    """
+
+    kind: str
+    value: Any = None
+    reason: str = ""
 
 
 class ReplEngine:
@@ -25,6 +58,13 @@ class ReplEngine:
     Public API
     ----------
     - ``execute(agent_id, code, namespace=None, timeout=None) -> Result``
+    - ``install(agent_id, generator) -> None``
+    - ``advance(agent_id, timeout=None) -> AdvanceOutcome``
+    - ``inject(agent_id, namespace) -> None``
+    - ``suspend(agent_id) -> None``
+    - ``resume(agent_id) -> None``
+    - ``kill(agent_id) -> None``
+    - ``run_block(agent_id, code, timeout=None) -> Result``
     - ``reset(agent_id) -> None``
     - ``globals_for(agent_id) -> dict``
     - ``has_workspace(agent_id) -> bool``
@@ -60,11 +100,38 @@ class ReplEngine:
       in-place mutation of a nested object by a timed-out turn is not rolled
       back (deep-copying arbitrary workspace contents is neither safe nor
       cheap).
+
+    Resumable-run primitives (IMP-001 Step 1)
+    -----------------------------------------
+    - **Runner**: :meth:`install` registers a resumable generator as the
+      agent's ``__runner`` (engine-side; the workspace-citizen exposure lands
+      with the fabrication kit in Step 2). :meth:`advance` runs one
+      yield-window (one step) under the per-agent lock and returns an
+      :class:`AdvanceOutcome` describing what the generator yielded.
+    - **Per-advance snapshot**: each timed advance snapshots the workspace
+      (the shallow-copy mechanism of INFO-020, now per-step). On timeout the
+      workspace is rolled back to the snapshot and the generator is
+      **abandoned** — never resumed, because the old worker thread may still
+      be mutating the discarded snapshot dict. Sequential join-ordered
+      advances are safe.
+    - **Lifecycle**: :meth:`suspend` parks the runner (advance does not run
+      it), :meth:`resume` continues it from the same point, :meth:`kill`
+      abandons it and clears the installed runner. Cancellation lands between
+      steps (INFO-040).
+    - **Nested exec reentrancy**: :meth:`run_block` executes a code block
+      against the workspace WITHOUT taking the per-agent lock (the pump
+      already holds it during an advance), so a nested ``run_block`` from
+      inside a generator step does not deadlock. A runaway nested block is
+      caught only by the outer step timeout; ``run_block``'s own ``timeout``
+      argument is accepted for API compatibility and is not enforced by the
+      nested call.
     """
 
     def __init__(self) -> None:
         self._workspaces: dict[str, dict] = {}
         self._locks: dict[str, threading.Lock] = {}
+        self._runners: dict[str, Any] = {}
+        self._runner_states: dict[str, str] = {}
         self._dict_lock = threading.Lock()
 
     # -- public API -------------------------------------------------------- #
@@ -93,6 +160,103 @@ class ReplEngine:
                 agent_id, workspace, code, prev_result, timeout, snapshot
             )
 
+    def install(self, agent_id: str, generator: Any) -> None:
+        """Register *generator* as the agent's resumable ``__runner``.
+
+        Replaces any previously installed runner. The generator is advanced
+        one yield-window per :meth:`advance` call.
+        """
+        with self._dict_lock:
+            self._workspaces.setdefault(agent_id, {})
+            lock = self._locks.setdefault(agent_id, threading.Lock())
+        with lock:
+            self._runners[agent_id] = generator
+            self._runner_states[agent_id] = "active"
+
+    def advance(
+        self, agent_id: str, timeout: float | None = None
+    ) -> AdvanceOutcome:
+        """Advance the installed runner one yield-window (one step).
+
+        Runs under the per-agent lock. With a timeout, the step runs in a
+        daemon worker thread joined for *timeout* seconds; on timeout the
+        workspace is rolled back to the per-advance snapshot and the runner is
+        abandoned (never resumed).
+        """
+        with self._dict_lock:
+            workspace = self._workspaces.setdefault(agent_id, {})
+            lock = self._locks.setdefault(agent_id, threading.Lock())
+
+        with lock:
+            runner = self._runners.get(agent_id)
+            state = self._runner_states.get(agent_id)
+            if runner is None:
+                if state == "abandoned":
+                    return AdvanceOutcome(kind="abandoned")
+                return AdvanceOutcome(kind="not_installed")
+            if state == "suspended":
+                return AdvanceOutcome(kind="suspended")
+            if timeout is None:
+                return self._advance_sync(agent_id, workspace, runner)
+            return self._advance_timed(agent_id, workspace, runner, timeout)
+
+    def inject(self, agent_id: str, namespace: dict) -> None:
+        """Merge *namespace* into the agent's workspace (caller values win).
+
+        Used by the pump to refresh the in-code surface between steps.
+        """
+        with self._dict_lock:
+            workspace = self._workspaces.setdefault(agent_id, {})
+            lock = self._locks.setdefault(agent_id, threading.Lock())
+        with lock:
+            workspace.update(namespace)
+
+    def suspend(self, agent_id: str) -> None:
+        """Park the installed runner: advance will not run it until resumed."""
+        with self._dict_lock:
+            lock = self._locks.setdefault(agent_id, threading.Lock())
+        with lock:
+            if agent_id in self._runners:
+                self._runner_states[agent_id] = "suspended"
+
+    def resume(self, agent_id: str) -> None:
+        """Continue a suspended runner from the same point."""
+        with self._dict_lock:
+            lock = self._locks.setdefault(agent_id, threading.Lock())
+        with lock:
+            if self._runner_states.get(agent_id) == "suspended":
+                self._runner_states[agent_id] = "active"
+
+    def kill(self, agent_id: str) -> None:
+        """Abandon the installed runner and clear it; it is never resumed."""
+        with self._dict_lock:
+            lock = self._locks.setdefault(agent_id, threading.Lock())
+        with lock:
+            if agent_id in self._runners:
+                self._abandon_runner(agent_id)
+
+    def run_block(
+        self, agent_id: str, code: str, timeout: float | None = None
+    ) -> Result:
+        """Execute *code* against the agent's workspace WITHOUT the lock.
+
+        Reentrant nested exec: safe to call from inside an advance (the pump
+        already holds the per-agent lock during a step). A runaway nested
+        block is caught only by the outer step timeout; *timeout* is accepted
+        for API compatibility and is not enforced here.
+        """
+        with self._dict_lock:
+            workspace = self._workspaces.get(agent_id)
+        if workspace is None:
+            return Result(done=True, ok=False, reason="no workspace for agent")
+        try:
+            exec(code, workspace)
+        except BaseException as exc:  # noqa: BLE001 - contained per INFO-005
+            return Result(
+                done=True, ok=False, reason=f"{type(exc).__name__}: {exc}"
+            )
+        return self._result_from(workspace)
+
     def reset(self, agent_id: str) -> None:
         """Drop the agent's workspace and lock; the next execute starts fresh.
 
@@ -102,6 +266,8 @@ class ReplEngine:
         with self._dict_lock:
             self._workspaces.pop(agent_id, None)
             self._locks.pop(agent_id, None)
+            self._runners.pop(agent_id, None)
+            self._runner_states.pop(agent_id, None)
 
     def globals_for(self, agent_id: str) -> dict:
         """Return a copy of the agent's workspace (inspection only)."""
@@ -115,6 +281,74 @@ class ReplEngine:
             return agent_id in self._workspaces
 
     # -- internals --------------------------------------------------------- #
+
+    def _advance_sync(
+        self, agent_id: str, workspace: dict, runner: Any
+    ) -> AdvanceOutcome:
+        try:
+            value = next(runner)
+        except StopIteration:
+            self._finish_runner(agent_id)
+            return AdvanceOutcome(kind="finished")
+        except BaseException as exc:  # noqa: BLE001 - contained
+            self._finish_runner(agent_id)
+            return AdvanceOutcome(
+                kind="error", reason=f"{type(exc).__name__}: {exc}"
+            )
+        return AdvanceOutcome(kind="yield", value=value)
+
+    def _advance_timed(
+        self,
+        agent_id: str,
+        workspace: dict,
+        runner: Any,
+        timeout: float,
+    ) -> AdvanceOutcome:
+        snapshot = dict(workspace)
+        outcome: dict = {}
+
+        def run() -> None:
+            try:
+                value = next(runner)
+                outcome["kind"] = "yield"
+                outcome["value"] = value
+            except StopIteration:
+                outcome["kind"] = "finished"
+            except BaseException as exc:  # noqa: BLE001 - contained
+                outcome["kind"] = "error"
+                outcome["reason"] = f"{type(exc).__name__}: {exc}"
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        worker.join(timeout)
+        if worker.is_alive():
+            # Timed out: the worker may still be mutating *workspace*; discard
+            # it and roll back to the per-advance snapshot (INFO-020, now
+            # per-step).
+            with self._dict_lock:
+                self._workspaces[agent_id] = snapshot
+            self._abandon_runner(agent_id)
+            return AdvanceOutcome(kind="timeout")
+        kind = outcome.get("kind")
+        if kind == "yield":
+            return AdvanceOutcome(kind="yield", value=outcome.get("value"))
+        if kind == "finished":
+            self._finish_runner(agent_id)
+            return AdvanceOutcome(kind="finished")
+        self._finish_runner(agent_id)
+        return AdvanceOutcome(kind="error", reason=outcome.get("reason", ""))
+
+    def _finish_runner(self, agent_id: str) -> None:
+        """Drop a runner that ended on its own (StopIteration or a raise)."""
+        with self._dict_lock:
+            self._runners.pop(agent_id, None)
+            self._runner_states.pop(agent_id, None)
+
+    def _abandon_runner(self, agent_id: str) -> None:
+        """Drop a runner that must never be resumed (timeout or kill)."""
+        with self._dict_lock:
+            self._runners.pop(agent_id, None)
+            self._runner_states[agent_id] = "abandoned"
 
     def _run_sync(
         self, workspace: dict, code: str, prev_result: object
