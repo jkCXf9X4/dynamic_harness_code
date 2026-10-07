@@ -21,3 +21,7 @@ resulting state is written into the owning layer, or when it is rejected.
 <!-- pb:index:start -->
 - [Selected IMPs](selected/README.md) — Scoped candidates chosen for pursuit, awaiting decision records and adoption
 <!-- pb:index:end -->
+
+## Open IMPs
+
+- **IMP-001** Agent-owned executor — the REPL as the main loop · open · awaiting decision records and adoption

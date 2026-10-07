@@ -2,7 +2,9 @@
 
 [layout]
 # The installed skill bundles are reference material, not breakdown nodes.
-exclude_dirs = [".agents"]
+# Runtime/venv directories are not breakdown state and would otherwise trip
+# the leaf front-matter checks (generated artifacts, vendored docs).
+exclude_dirs = [".agents", ".dhc", ".dynamic-harness", ".venv", ".pytest_cache", "dhc.egg-info"]
 
 [nodes]
 # Reference material attached to a candidate (INFO-029), not a leaf: no
@@ -12,3 +14,10 @@ exclude_dirs = [".agents"]
 # — reference material riding with the sketches it governs, not breakdown
 # state.
 exempt = ["give-agents-an-in-code-capability-surface.verbs.md", "commit-to-a-minimal-execution-core-contract.analysis.md", "AGENTS.md", "mockups"]
+
+[ids]
+# Planned handles cited by leaves before their own leaf/record files land.
+# INFO-029 is the in-code capability-surface candidate and INFO-037 is the
+# deliberately-uncommitted kernel/execution-core contract this IMP proposes to
+# make real. (INFO-049 formerly lived here but now has a real leaf.)
+reserved_ids = ["INFO-029", "INFO-037"]
