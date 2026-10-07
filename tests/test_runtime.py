@@ -662,13 +662,22 @@ def test_stop_joins_all_threads():
 
 
 def test_room_registry():
+    """room is a TOOL (not core): it must be installed via the tools layer.
+
+    The core namespace is slim (no room); the tools layer composes it in.
+    """
+    from dhc.communication import RoomManager
+    from dhc.tools import register_default_tools
+
     rt = make_runtime()
+    rooms = RoomManager(rt.event_bus)
+    register_default_tools(rt, store=rt.artifact_store, channels={"rooms": rooms})
     handle = rt.spawn(
         "do it",
         driver=ScriptedDriver(
             "r = room('war-room')\n"
             "assert r.name == 'war-room'\n"
-            "assert agent.id in r.members\n"
+            "assert agent.id in r.member_ids\n"
             "complete('room ok')\n"
         ),
     )

@@ -23,15 +23,16 @@ file — no committed module is edited) and wires the real modules together:
 * :class:`~dhc.artifact_store.ArtifactStore` — content-addressed (INFO-006)
 * the communication channels (Messenger, RoomManager, EscalationChannel,
   OperatorQuestionChannel) on the same bus
-* the in-code namespace extensions (publish-with-event, messenger, room,
-  escalate, ask_operator, MockDriver, driver_from_settings)
+* the tools layer (:func:`dhc.tools.register_default_tools`) — the artifact
+  store and channels exposed as REPL namespace callables, composed in here
+  (the composition root), not in the core runtime.
 """
 
 from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .artifact_store import ArtifactStore, BoundaryEventLog
 from .communication import (
@@ -48,6 +49,7 @@ from .models import Artifact, Event, EventKind, Message
 from .operator import Operator
 from .repl import ReplEngine
 from .runtime import Runtime
+from .tools import ToolContext, register_default_tools
 
 #: Map the runtime's event kinds onto the five boundary kinds (INFO-049).
 _BOUNDARY_KIND = {
@@ -252,6 +254,10 @@ class _StoreAdapter:
     def count(self) -> int:
         return self._store.count()
 
+    def path_for(self, artifact_id: str) -> Path:
+        """Return the on-disk path of the artifact's report body."""
+        return self._store._report_path(artifact_id)
+
 
 class _BoundMessenger:
     """A per-agent facade over the shared Messenger (INFO-015)."""
@@ -266,38 +272,11 @@ class _BoundMessenger:
     def inbox(self) -> list:
         return self._messenger.inbox(self._agent_id)
 
+    def read(self, message_id: str) -> Message | None:
+        return self._messenger.read(self._agent_id, message_id)
+
     def unread_count(self) -> int:
         return self._messenger.unread_count(self._agent_id)
-
-
-def _publish_with_event(agent: Any, bus: EventBus) -> Any:
-    """Wrap ``publish`` so every artifact crossing the boundary is logged."""
-
-    def publish(headline: str, summary: str, report: Any) -> Artifact:
-        artifact = agent.publish(headline, summary, report)
-        bus.publish(
-            Event(
-                kind=EventKind.artifact_published,
-                agent_id=agent.id,
-                payload={"artifact_id": artifact.id},
-            )
-        )
-        return artifact
-
-    return publish
-
-
-def _escalate(escalations: EscalationChannel, agent: Any) -> Any:
-    """Bind the escalation channel to *agent* (INFO-011, upstream only)."""
-
-    def escalate(reason: str) -> Event:
-        if agent.parent_id is None:
-            raise ChannelError("root agent has no parent to escalate to")
-        return escalations.escalate(
-            agent.id, agent.parent_id, agent.requirement, reason
-        )
-
-    return escalate
 
 
 def _extend_namespace(
@@ -307,24 +286,35 @@ def _extend_namespace(
     rooms: RoomManager,
     escalations: EscalationChannel,
     questions: OperatorQuestionChannel,
+    store: Any,
 ) -> None:
-    """Extend the runtime's in-code namespace with the wired surface.
+    """Compose the tools layer onto the runtime's core namespace.
 
-    The committed :class:`~dhc.runtime.Runtime` builds the base namespace
-    (agent, publish, spawn, complete, fail, cancel, status, result, tool,
-    bash, room, await_, poll, children_of). This wraps that builder to add
-    the real channel helpers and the driver factory, so action blocks can use
-    the full surface.
+    The core :class:`~dhc.runtime.Runtime` builds the slim base namespace
+    (agent, spawn, complete, fail, cancel, status, result, tool, bash,
+    await_, poll, children_of). This composition root installs the artifact
+    store and communication channels as REPL tools via
+    :func:`dhc.tools.register_default_tools`, plus the driver factory
+    (MockDriver / driver_from_settings) that action blocks use to spawn
+    children.
     """
+    register_default_tools(
+        runtime,
+        store=store,
+        bus=bus,
+        channels={
+            # The messenger is a per-agent facade: bind it to the calling
+            # agent at namespace-build time.
+            "messenger": lambda agent_id: _BoundMessenger(messenger, agent_id),
+            "rooms": rooms,
+            "escalations": escalations,
+            "questions": questions,
+        },
+    )
     original = runtime._build_namespace
 
     def build(agent: Any) -> dict:
         ns = original(agent)
-        ns["publish"] = _publish_with_event(agent, bus)
-        ns["room"] = lambda name: rooms.join(agent.id, name)
-        ns["messenger"] = _BoundMessenger(messenger, agent.id)
-        ns["escalate"] = _escalate(escalations, agent)
-        ns["ask_operator"] = lambda question: questions.ask(agent.id, question)
         ns["MockDriver"] = MockDriver
         ns["driver_from_settings"] = driver_from_settings
         return ns
@@ -348,10 +338,15 @@ def build_runtime(
     dispatcher as ``runtime.dispatcher``; the boundary log as
     ``runtime.boundary_log``.
 
-    *settings* defaults to the process-wide :func:`~dhc.config.get_settings`.
-    *artifact_root* overrides the store/log location (tests pass a tmp dir).
-    *mock* is recorded on the runtime (``runtime.mock``) and used by
-    :func:`~dhc.driver.driver_from_settings` when callers build drivers.
+    The artifact store and channels are installed into the agent namespace as
+    REPL tools (publish, read_artifact, archive, list_artifacts, room,
+    messenger, escalate, ask_operator, post, channel_read, list_tools) by
+    :func:`dhc.tools.register_default_tools` — the composition root, keeping
+    the core (runtime + eventbus) slim.
+
+    *settings* defaults to the process-wide :func:`~dhc.config.get_settings`;
+    *artifact_root* overrides the settings' artifact root; *mock* is kept for
+    API compatibility (the mock path is chosen by the driver factory).
     """
     if settings is None:
         settings = get_settings()
@@ -394,5 +389,7 @@ def build_runtime(
     runtime.operator = Operator(runtime=runtime, question_channel=questions)
     runtime.mock = mock
 
-    _extend_namespace(runtime, bus, messenger, rooms, escalations, questions)
+    _extend_namespace(
+        runtime, bus, messenger, rooms, escalations, questions, store_adapter
+    )
     return runtime

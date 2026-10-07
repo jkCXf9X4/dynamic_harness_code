@@ -18,7 +18,7 @@ import time
 import traceback
 from typing import Any, Callable, Optional
 
-from .agent import Agent, AgentHandle, _ROOMS, bash, room
+from .agent import Agent, AgentHandle, bash
 from .errors import ChannelError, TurnError, TurnTimeoutError
 from .models import (
     TERMINAL_STATES,
@@ -332,10 +332,15 @@ class Runtime:
             self._settle(agent_id, AgentStatus.failed, reason=f"worker crashed: {exc}")
 
     def _build_namespace(self, agent: Agent) -> dict:
-        """Build the in-code namespace for one turn from the Agent."""
+        """Build the in-code namespace for one turn from the Agent.
+
+        CORE-ONLY names (the architectural goal: core = runtime + eventbus).
+        The artifact store and communication channels are REPL tools composed
+        in by :func:`dhc.tools.register_default_tools` (via wiring.py), not
+        part of the core namespace.
+        """
         ns = {
             "agent": agent,
-            "publish": agent.publish,
             "spawn": agent.spawn,
             "complete": agent.complete,
             "fail": agent.fail,
@@ -344,7 +349,6 @@ class Runtime:
             "result": agent.result,
             "tool": agent.tool,
             "bash": bash,
-            "room": lambda name: room(agent, name),
             "await_": agent.await_,
             "poll": agent.poll,
             "children_of": agent.children_of,
