@@ -1,0 +1,44 @@
+{
+  "llm": {
+    "model": "deepseek/deepseek-v4-flash",
+    "base_url": "https://openrouter.ai/api/v1",
+    "provider_ignore": [],
+    "provider_allow_fallbacks": true,
+    "provider_force": null,
+    "verify_ssl": true,
+    "price_input_per_mtok": null,
+    "price_output_per_mtok": null,
+    "call_timeout_seconds": 500.0,
+    "retry_max_attempts": 4,
+    "rate_limit_max_attempts": 6,
+    "retry_base_delay_seconds": 1.0,
+    "retry_max_delay_seconds": 30.0,
+    "retry_jitter_seconds": 0.5,
+    "rate_limit_backoff_multiplier": 3.0,
+    "fallback_on_rate_limit": true
+  },
+  "safety": {
+    "timeout_seconds": 7200.0,
+    "max_iterations": 400,
+    "max_agent_tokens": null,
+    "max_agents": 300,
+    "max_depth": 15
+  },
+  "agent": {
+    "environment_notes": [],
+    "references_dir": null,
+    "skills_dir": null,
+    "active_turn_window": 50,
+    "stream_children": true
+  },
+  "communication": {
+    "topology": "off",
+    "registration": "parent",
+    "shared_topic": "shared",
+    "channels": [],
+    "digest_mode": "pull",
+    "digest_max_items": 5,
+    "digest_max_tokens": 400,
+    "trace": true
+  }
+}
