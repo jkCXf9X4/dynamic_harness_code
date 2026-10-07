@@ -697,3 +697,155 @@ def test_bash_tool_returns_text():
     assert completion.status == AgentStatus.completed
     assert completion.summary == "hello"
     rt.stop()
+
+
+# --------------------------------------------------------------------------- #
+# IMP-001 Step 3: the pump (_pump_agent) — four hard gates + caps watchdog
+# --------------------------------------------------------------------------- #
+# These tests exercise the PUMPED path: a fully-wired runtime (ReplEngine +
+# fabrication kit) driving the default __runner generator one step at a time.
+# The legacy in-memory path is covered by the tests above (make_runtime).
+
+
+def _pumped_runtime(tmp_path, **settings_kwargs):
+    """A fully-wired runtime (ReplEngine + fabrication kit) over tmp_path."""
+    from dhc.config import Settings
+    from dhc.wiring import build_runtime
+
+    settings = Settings(
+        workspace_root=tmp_path,
+        artifact_root=tmp_path,
+        **settings_kwargs,
+    )
+    rt = build_runtime(mock=True, artifact_root=tmp_path, settings=settings)
+    rt.start()
+    return rt
+
+
+def test_pump_default_runner_completes(tmp_path):
+    """A plain spawn with a MockDriver script completes through the pump."""
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path)
+    try:
+        handle = rt.spawn("do it", driver=MockDriver(["complete('all good')"]))
+        completion = handle.await_()
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "all good"
+        assert rt.result(handle.id).ok
+    finally:
+        rt.stop()
+
+
+def test_pump_runaway_loop_contained_mesh_alive(tmp_path):
+    """A runaway step is bounded by the step timeout; the mesh stays alive."""
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path, max_turn_seconds=0.2)
+    try:
+        runaway = rt.spawn(
+            "runaway",
+            driver=MockDriver(["x = 'partial'\nwhile True: pass"]),
+        )
+        t0 = time.monotonic()
+        completion = runaway.await_()
+        assert time.monotonic() - t0 < 5
+        assert completion.status == AgentStatus.timeout
+        # A timeout event was emitted.
+        assert any(e.kind == EventKind.timeout for e in rt.events(runaway.id))
+        # The workspace was rolled back: the runaway step's partial mutation
+        # is gone (the engine abandoned the runner and restored the snapshot).
+        assert "x" not in rt.repl_engine.globals_for(runaway.id)
+        # A sibling spawned after still completes (mesh alive).
+        sibling = rt.spawn("sibling", driver=MockDriver(["complete('fine')"]))
+        assert sibling.await_().status == AgentStatus.completed
+    finally:
+        rt.stop()
+
+
+def test_pump_child_count_cap_forced_stop(tmp_path):
+    """A tiny child cap force-stops the parent (settles failed, cap reason)."""
+    from dhc.config import HarnessConfig, SafetyConfig
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_agents=1)),
+    )
+    try:
+        parent = rt.spawn(
+            "parent",
+            driver=MockDriver(
+                [
+                    "c1 = spawn('child', driver=MockDriver.single(\"complete('ok')\"))\n"
+                    "complete('spawned')\n"
+                ]
+            ),
+        )
+        completion = parent.await_()
+        assert completion.status == AgentStatus.failed
+        assert "cap exceeded" in completion.reason
+        assert "children" in completion.reason
+        # A crash event was emitted with the cap name and limit.
+        kinds = [e.kind for e in rt.events(parent.id)]
+        assert EventKind.crash in kinds
+        # The child still completes (mesh alive).
+        for cid in rt.children_of(parent.id):
+            assert rt.await_(cid).status == AgentStatus.completed
+    finally:
+        rt.stop()
+
+
+def test_pump_settlement_at_most_once(tmp_path):
+    """Through the pump: exactly one completion; a second settle raises."""
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path)
+    try:
+        parent = rt.spawn(
+            "parent",
+            driver=MockDriver(
+                [
+                    "c1 = spawn('child', driver=MockDriver.single(\"complete('child done')\"))\n"
+                    "complete('spawned')\n"
+                ]
+            ),
+        )
+        parent.await_()
+        child_id = rt.children_of(parent.id)[0]
+        rt.await_(child_id)
+        completions = rt.completions(parent.id)
+        assert len(completions) == 1
+        assert completions[0].agent_id == child_id
+        assert completions[0].status == AgentStatus.completed
+        with pytest.raises(ChannelError):
+            rt.completion_log().settle(
+                Completion(agent_id=child_id, status=AgentStatus.failed, reason="late")
+            )
+    finally:
+        rt.stop()
+
+
+def test_pump_cancellation_grace_kill_rollback_settle(tmp_path):
+    """Cancel between steps: settles cancelled, runner killed, workspace rolled back."""
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path, max_turn_seconds=1.0)
+    try:
+        handle = rt.spawn(
+            "slow",
+            driver=MockDriver(["x = 'partial'\nwhile True: pass"]),
+        )
+        # Wait for the step to start (turn_started is emitted before advance).
+        assert wait_for(
+            lambda: any(e.kind == EventKind.turn_started for e in rt.events(handle.id))
+        )
+        res = handle.cancel("stop now")
+        assert res.done and not res.ok
+        assert wait_for(lambda: rt.poll(handle.id) == AgentStatus.cancelled)
+        # The runner was killed: advance returns abandoned (never resumed).
+        assert rt.repl_engine.advance(handle.id).kind == "abandoned"
+        # The workspace was rolled back: no partial mutation from the step.
+        assert "x" not in rt.repl_engine.globals_for(handle.id)
+    finally:
+        rt.stop()
