@@ -17,7 +17,10 @@ Two drivers are provided:
 
 :func:`driver_from_settings` is the factory: mock mode (or no API key) yields
 a :class:`MockDriver` with a sensible default script; otherwise an
-:class:`LLMDriver` over a real :class:`~dhc.llm.LLMClient`.
+:class:`LLMDriver` over a real :class:`~dhc.llm.LLMClient` wrapping an
+:class:`~dhc.llm.OpenAIProvider` (model / base_url / timeout from
+``settings.provider``; API key via ``merge_api_key()`` —
+``OPENROUTER_API_KEY`` → ``OPENAI_API_KEY``).
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ import json
 import logging
 from typing import Any, Callable, Optional
 
-from .config import get_settings
+from .config import get_settings, merge_api_key
 from .llm import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -196,17 +199,22 @@ def driver_from_settings(settings: Any = None, mock: bool = False) -> Any:
 
     ``mock=True`` or no API key -> a :class:`MockDriver` with the default
     script; otherwise an :class:`LLMDriver` over a real
-    :class:`~dhc.llm.LLMClient` (constructed lazily — no network at build
-    time).
+    :class:`~dhc.llm.LLMClient` wrapping an
+    :class:`~dhc.llm.OpenAIProvider` (constructed lazily — no network at
+    build time). The key is resolved by :func:`~dhc.config.merge_api_key`
+    (``OPENROUTER_API_KEY`` → ``OPENAI_API_KEY``); model / base_url / timeout
+    come from ``settings.provider``.
     """
     if settings is None:
         settings = get_settings()
-    has_key = bool(getattr(settings, "openai_api_key", ""))
+    has_key = bool(merge_api_key())
     if mock or not has_key:
         return MockDriver(list(DEFAULT_SCRIPT))
+    provider_cfg = settings.provider
     client = LLMClient(
-        api_key=settings.openai_api_key,
-        model=settings.openai_model,
-        timeout_seconds=settings.llm_timeout_seconds,
+        api_key=merge_api_key(),
+        model=provider_cfg.model,
+        timeout_seconds=provider_cfg.call_timeout_seconds,
+        base_url=provider_cfg.base_url,
     )
     return LLMDriver(client)

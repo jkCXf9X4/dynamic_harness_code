@@ -9,10 +9,39 @@ from __future__ import annotations
 
 import time
 
+import httpx
+import openai
 import pytest
 
+import dhc.config as config_mod
 from dhc import errors
-from dhc.llm import ContextRotDetector, LLMClient, MockLLM, RotReport
+from dhc.config import merge_api_key
+from dhc.driver import LLMDriver, MockDriver, driver_from_settings
+from dhc.llm import (
+    ContextRotDetector,
+    LLMClient,
+    LLMConfig,
+    LLMProvider,
+    LLMResponse,
+    MockLLM,
+    OpenAIProvider,
+    RotReport,
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config(monkeypatch, tmp_path):
+    """Point XDG discovery at tmp_path and reset the settings singleton.
+
+    Mirrors tests/test_config.py so a real user config or a previous test can
+    never leak into provider-default assertions.
+    """
+    monkeypatch.setattr(
+        config_mod, "XDG_CONFIG_DIR", tmp_path / ".config" / "dynamic-harness"
+    )
+    monkeypatch.setattr(config_mod, "_settings", None)
+    yield
+    monkeypatch.setattr(config_mod, "_settings", None)
 
 
 # ---------------------------------------------------------------------------
@@ -243,3 +272,409 @@ class TestContextRotDetector:
         text = "do the thing do the thing do the thing do the thing do the thing"
         assert detector.detect(text).rot is False  # score < 1.0 threshold
         assert detector.detect(text).score > 0.0
+
+# ---------------------------------------------------------------------------
+# OpenAIProvider — defaults, key precedence, retries, routing, timeout
+# ---------------------------------------------------------------------------
+
+
+class _FakeUsage:
+    def __init__(self, prompt_tokens=10, completion_tokens=5, cost=None):
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.prompt_tokens_details = None
+        self.cost = cost
+
+
+class _FakeMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = _FakeMessage(content)
+
+
+class _FakeResponse:
+    def __init__(self, content, usage=None):
+        self.choices = [_FakeChoice(content)]
+        self.usage = usage
+
+
+class _FakeCompletions:
+    """Scripted fake: each call pops the next result/exception from the queue."""
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = []
+        self.kwargs_list = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        self.kwargs_list.append(kwargs)
+        if not self.script:
+            raise AssertionError("fake exhausted")
+        item = self.script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class _FakeChat:
+    def __init__(self, completions):
+        self.completions = completions
+
+
+class _FakeOpenAI:
+    def __init__(self, completions):
+        self.chat = _FakeChat(completions)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _inject_fake(provider, completions):
+    """Inject a fake openai client into the provider (no network)."""
+    provider._client = _FakeOpenAI(completions)
+    return completions
+
+
+def _rate_limit_error():
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(429, request=request)
+    return openai.RateLimitError(
+        "rate limit exceeded", response=response, body=None
+    )
+
+
+def _timeout_error():
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    return openai.APITimeoutError(request=request)
+
+
+def _connection_error():
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    return openai.APIConnectionError(message="connection dropped", request=request)
+
+
+class TestOpenAIProviderDefaults:
+    def test_defaults_come_from_config(self, monkeypatch):
+        """Model/base_url default to the OpenRouter config values."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider()
+        assert provider.default_model == "deepseek/deepseek-v4-flash"
+        assert provider._base_url == "https://openrouter.ai/api/v1"
+        assert provider._is_openrouter is True
+        assert provider.timeout == 500.0
+        assert provider.max_retries == 4
+        assert provider.rate_limit_max_attempts == 6
+        assert provider.retry_base_delay_seconds == 1.0
+        assert provider.retry_max_delay_seconds == 30.0
+        assert provider.retry_jitter_seconds == 0.5
+        assert provider.rate_limit_backoff_multiplier == 3.0
+        assert provider.fallback_on_rate_limit is True
+
+    def test_explicit_args_override_config(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(
+            model="custom-model",
+            base_url="https://custom.example/v1",
+            timeout=10.0,
+            max_retries=2,
+        )
+        assert provider.default_model == "custom-model"
+        assert provider._base_url == "https://custom.example/v1"
+        assert provider._is_openrouter is False
+        assert provider.timeout == 10.0
+        assert provider.max_retries == 2
+
+    def test_available_reflects_key(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        assert OpenAIProvider().available() is False
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        assert OpenAIProvider().available() is True
+
+    def test_generate_without_key_raises_turn_error(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        provider = OpenAIProvider()
+        with pytest.raises(errors.TurnError):
+            provider.generate("system", "user")
+
+
+class TestMergeApiKeyPrecedence:
+    def test_openrouter_wins_over_openai(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
+        assert merge_api_key() == "sk-or"
+
+    def test_openai_fallback(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
+        assert merge_api_key() == "sk-oa"
+
+    def test_none_without_env(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        assert merge_api_key() is None
+
+    def test_provider_uses_merge_api_key(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
+        assert OpenAIProvider()._api_key == "sk-oa"
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        assert OpenAIProvider()._api_key == "sk-or"
+
+
+class TestOpenAIProviderRetries:
+    def test_retries_transient_then_succeeds(self, monkeypatch):
+        """A transient failure is retried; the next attempt succeeds."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(
+            max_retries=4,
+            retry_base_delay_seconds=0.0,
+            retry_jitter_seconds=0.0,
+        )
+        completions = _FakeCompletions(
+            [
+                _connection_error(),
+                _FakeResponse("```python\nreturn 1\n```", usage=_FakeUsage()),
+            ]
+        )
+        _inject_fake(provider, completions)
+        response = provider.generate("system", "user")
+        assert response.text == "```python\nreturn 1\n```"
+        assert len(completions.calls) == 2
+
+    def test_retries_rate_limit_then_succeeds(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(
+            max_retries=4,
+            rate_limit_max_attempts=6,
+            retry_base_delay_seconds=0.0,
+            retry_jitter_seconds=0.0,
+        )
+        completions = _FakeCompletions(
+            [
+                _rate_limit_error(),
+                _FakeResponse("return 2", usage=_FakeUsage()),
+            ]
+        )
+        _inject_fake(provider, completions)
+        response = provider.generate("system", "user")
+        assert response.text == "return 2"
+        assert len(completions.calls) == 2
+
+    def test_raises_turn_error_after_exhausting_retries(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(
+            max_retries=2,
+            retry_base_delay_seconds=0.0,
+            retry_jitter_seconds=0.0,
+        )
+        completions = _FakeCompletions(
+            [_connection_error(), _connection_error(), _connection_error()]
+        )
+        _inject_fake(provider, completions)
+        with pytest.raises(errors.TurnError):
+            provider.generate("system", "user")
+        assert len(completions.calls) == 2  # 1 attempt + 1 retry
+
+    def test_non_retryable_error_raises_immediately(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(max_retries=4)
+        completions = _FakeCompletions([RuntimeError("boom")])
+        _inject_fake(provider, completions)
+        with pytest.raises(errors.TurnError):
+            provider.generate("system", "user")
+        assert len(completions.calls) == 1
+
+    def test_timeout_raises_turn_timeout_without_retry(self, monkeypatch):
+        """A watchdog timeout is never retried — it surfaces immediately."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(timeout=0.2, max_retries=4)
+
+        class SleepingCompletions:
+            def create(self, **kwargs):
+                time.sleep(30)
+                raise AssertionError("should never return")
+
+        class SleepingChat:
+            completions = SleepingCompletions()
+
+        class SleepingOpenAI:
+            chat = SleepingChat()
+
+            def close(self):
+                pass
+
+        provider._client = SleepingOpenAI()
+        start = time.monotonic()
+        with pytest.raises(errors.TurnTimeoutError):
+            provider.generate("system", "user")
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"timeout containment took {elapsed:.1f}s"
+
+
+class TestOpenAIProviderRouting:
+    def test_openrouter_extra_body_routing(self, monkeypatch):
+        """provider_force/ignore/allow_fallbacks + session_id forwarded to
+        OpenRouter."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(
+            provider_force="deepinfra",
+            provider_ignore=["together"],
+            provider_allow_fallbacks=False,
+        )
+        completions = _FakeCompletions(
+            [_FakeResponse("ok", usage=_FakeUsage())]
+        )
+        _inject_fake(provider, completions)
+        provider.generate(
+            "system",
+            "user",
+            LLMConfig(session_id="sess-1"),
+        )
+        kwargs = completions.calls[0]
+        extra = kwargs["extra_body"]
+        assert extra["provider"]["order"] == ["deepinfra"]
+        assert extra["provider"]["allow_fallbacks"] is False
+        assert extra["provider"]["ignore"] == ["together"]
+        assert extra["session_id"] == "sess-1"
+
+    def test_openrouter_ignore_only(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(provider_ignore=["together"])
+        completions = _FakeCompletions(
+            [_FakeResponse("ok", usage=_FakeUsage())]
+        )
+        _inject_fake(provider, completions)
+        provider.generate("system", "user")
+        extra = completions.calls[0]["extra_body"]
+        assert extra["provider"]["ignore"] == ["together"]
+        assert extra["provider"]["allow_fallbacks"] is True
+        assert "session_id" not in extra
+
+    def test_no_extra_body_when_nothing_configured(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider()
+        completions = _FakeCompletions(
+            [_FakeResponse("ok", usage=_FakeUsage())]
+        )
+        _inject_fake(provider, completions)
+        provider.generate("system", "user")
+        assert "extra_body" not in completions.calls[0]
+
+    def test_no_extra_body_for_external_provider(self, monkeypatch):
+        """Routing is OpenRouter-only: an external base_url gets no extra_body."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(
+            base_url="https://custom.example/v1",
+            provider_force="deepinfra",
+        )
+        completions = _FakeCompletions(
+            [_FakeResponse("ok", usage=_FakeUsage())]
+        )
+        _inject_fake(provider, completions)
+        provider.generate("system", "user")
+        assert "extra_body" not in completions.calls[0]
+
+    def test_messages_and_temperature(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider()
+        completions = _FakeCompletions(
+            [_FakeResponse("ok", usage=_FakeUsage())]
+        )
+        _inject_fake(provider, completions)
+        provider.generate("sys", "usr")
+        kwargs = completions.calls[0]
+        assert kwargs["model"] == "deepseek/deepseek-v4-flash"
+        assert kwargs["temperature"] == 0.0
+        assert kwargs["messages"] == [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "usr"},
+        ]
+
+    def test_response_carries_usage_and_cost(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        provider = OpenAIProvider(
+            price_input_per_mtok=1.0,
+            price_output_per_mtok=2.0,
+        )
+        completions = _FakeCompletions(
+            [
+                _FakeResponse(
+                    "ok",
+                    usage=_FakeUsage(prompt_tokens=1_000_000, completion_tokens=500_000),
+                )
+            ]
+        )
+        _inject_fake(provider, completions)
+        response = provider.generate("system", "user")
+        assert response.usage["prompt_tokens"] == 1_000_000
+        assert response.usage["completion_tokens"] == 500_000
+        assert response.cost_usd == pytest.approx(1.0 + 1.0)  # 1*1 + 0.5*2
+
+
+class TestLLMClientWrapper:
+    def test_wraps_provider_and_strips_fences(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        client = LLMClient(api_key="sk-test", model="fake-model", timeout_seconds=5.0)
+        completions = _FakeCompletions(
+            [_FakeResponse("```python\nreturn 1\n```", usage=_FakeUsage())]
+        )
+        _inject_fake(client._provider, completions)
+        assert client.generate_code_block("do something") == "return 1"
+        kwargs = completions.calls[0]
+        assert kwargs["model"] == "fake-model"
+        assert kwargs["messages"][0]["role"] == "system"
+        assert kwargs["messages"][1]["role"] == "user"
+        assert "do something" in kwargs["messages"][1]["content"]
+
+    def test_close_releases_client(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        client = LLMClient(api_key="sk-test")
+        fake = _FakeOpenAI(_FakeCompletions([]))
+        client._provider._client = fake
+        client.close()
+        assert fake.closed is True
+        assert client._provider._client is None
+
+
+class TestDriverFromSettingsProvider:
+    def test_picks_llm_driver_with_key(self, monkeypatch):
+        """With a key present, the factory returns an LLMDriver over an
+        OpenAIProvider (model/base_url/timeout from settings.provider)."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        driver = driver_from_settings(mock=False)
+        assert isinstance(driver, LLMDriver)
+        client = driver._client
+        assert isinstance(client, LLMClient)
+        provider = client._provider
+        assert isinstance(provider, OpenAIProvider)
+        assert provider.default_model == "deepseek/deepseek-v4-flash"
+        assert provider._base_url == "https://openrouter.ai/api/v1"
+        assert provider.timeout == 500.0
+
+    def test_picks_mock_driver_without_key(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        driver = driver_from_settings(mock=False)
+        assert isinstance(driver, MockDriver)
+
+    def test_mock_flag_forces_mock(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        driver = driver_from_settings(mock=True)
+        assert isinstance(driver, MockDriver)
+
+    def test_mockllm_path_unchanged(self):
+        """The documented mock path still works end-to-end."""
+        mock = MockLLM({"def action": "def action():\n    return 1"})
+        assert mock.generate_code_block("please write def action") == (
+            "def action():\n    return 1"
+        )
+        assert mock.available() is True
+        mock.close()

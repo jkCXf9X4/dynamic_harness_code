@@ -182,6 +182,7 @@ def test_progressive_disclosure_via_real_store(runtime):
 def test_driver_from_settings_picks_mock_without_key(monkeypatch):
     """Without an API key, the factory returns a MockDriver (mock path)."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     driver = driver_from_settings(mock=False)
     assert isinstance(driver, MockDriver)
     # The default script publishes and completes.
