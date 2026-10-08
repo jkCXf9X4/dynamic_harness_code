@@ -176,6 +176,52 @@ class Operator:
             return
         self.undelivered_steers.append((agent_id, message))
 
+    # -- read-only inspection (D2) ------------------------------------------
+
+    def inspect(self, agent_id: str) -> dict:
+        """Return a read-only window into a live agent's workspace (D2).
+
+        Returns a copy of the agent's workspace globals (via the runtime's
+        ReplEngine when available) plus a status/result/caps digest. Never
+        mutates anything — no inject/advance/kill. Duck-typed: when the
+        runtime/engine lacks ``globals_for``, a minimal view (status +
+        result) is returned instead — never raises.
+        """
+        view: dict = {"agent_id": agent_id}
+        try:
+            view["status"] = self.runtime.status(agent_id).value
+        except Exception:  # noqa: BLE001 - inspection is best-effort
+            view["status"] = None
+        try:
+            result = self.runtime.result(agent_id)
+            view["result"] = {
+                "done": result.done,
+                "ok": result.ok,
+                "value": result.value,
+                "reason": result.reason,
+                "artifacts": list(result.artifacts),
+            }
+        except Exception:  # noqa: BLE001 - inspection is best-effort
+            view["result"] = None
+        engine = getattr(self.runtime, "repl_engine", None) or getattr(
+            self.runtime, "engine", None
+        )
+        globals_for = getattr(engine, "globals_for", None)
+        if callable(globals_for):
+            try:
+                view["workspace"] = dict(globals_for(agent_id))
+            except Exception:  # noqa: BLE001 - inspection is best-effort
+                view["workspace"] = {}
+        else:
+            view["workspace"] = {}
+        # Caps digest: the visible ceiling-caps view (D2), read-only.
+        try:
+            caps_fn = view["workspace"].get("caps")
+            view["caps"] = caps_fn() if callable(caps_fn) else None
+        except Exception:  # noqa: BLE001 - inspection is best-effort
+            view["caps"] = None
+        return view
+
     # -- operator questions (INFO-023) --------------------------------------
 
     def answer_questions(self, loop: bool = True) -> None:
@@ -275,6 +321,23 @@ class ChatSession:
             _, agent_id, message = parts
             self.operator.steer(agent_id, message)
             self.output_stream.write(f"steered {agent_id}\n")
+            self.output_stream.flush()
+            return True
+        if line.startswith("!inspect "):
+            parts = line.split(maxsplit=1)
+            if len(parts) < 2:
+                self.output_stream.write("usage: !inspect <agent_id>\n")
+                self.output_stream.flush()
+                return True
+            agent_id = parts[1].strip()
+            view = self.operator.inspect(agent_id)
+            self.output_stream.write(f"inspect {agent_id}\n")
+            self.output_stream.write(f"  status: {view.get('status')}\n")
+            self.output_stream.write(f"  result: {view.get('result')}\n")
+            self.output_stream.write(f"  caps: {view.get('caps')}\n")
+            self.output_stream.write(
+                f"  workspace keys: {sorted(view.get('workspace', {}))}\n"
+            )
             self.output_stream.flush()
             return True
         result = self.operator.run(line, driver=self.driver)

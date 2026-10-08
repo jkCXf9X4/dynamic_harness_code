@@ -99,6 +99,19 @@ class SafetyConfig(BaseModel):
     max_agent_tokens: int | None = None
     max_agents: int = Field(default=300, ge=1)
     max_depth: int = Field(default=15, ge=1)
+    # IMP-001 Step 5: ceiling caps (per-agent; None = runtime default).
+    max_workspace_bytes: int | None = Field(
+        default=None, ge=1,
+        description="Per-agent workspace ceiling in bytes (None = runtime default 1 MiB).",
+    )
+    max_children: int | None = Field(
+        default=None, ge=1,
+        description="Per-agent child cap (None = runtime default 32).",
+    )
+    max_messages_per_step: int | None = Field(
+        default=None, ge=1,
+        description="Message-rate cap per step (None = disabled).",
+    )
 
 
 class AgentConfig(BaseModel):

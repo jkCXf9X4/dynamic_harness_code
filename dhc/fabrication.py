@@ -290,6 +290,11 @@ def make_caps(runtime: Any, agent_id: str) -> Callable[[], dict]:
             "max_iterations": safety.max_iterations if safety else None,
             "max_agents": safety.max_agents if safety else None,
             "max_depth": safety.max_depth if safety else None,
+            # IMP-001 Step 5: the ceiling caps (per-agent; None = runtime
+            # default) — the reportable caps digest.
+            "max_workspace_bytes": safety.max_workspace_bytes if safety else None,
+            "max_children": safety.max_children if safety else None,
+            "max_messages_per_step": safety.max_messages_per_step if safety else None,
             "max_turn_seconds": runtime._max_turn_seconds(),
             "children": len(runtime.children_of(agent_id)),
         }

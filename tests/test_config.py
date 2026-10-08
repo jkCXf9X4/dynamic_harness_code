@@ -281,3 +281,23 @@ class TestConfigOverrides:
         # untouched defaults survive
         assert cfg.llm.provider_allow_fallbacks is True
         assert cfg.llm.verify_ssl is True
+
+# ---------------------------------------------------------------------------
+# IMP-001 Step 5: ceiling-cap defaults on SafetyConfig
+# ---------------------------------------------------------------------------
+
+
+def test_caps_defaults_present(tmp_path, monkeypatch):
+    """load_config().safety exposes the new ceiling-cap fields with defaults."""
+    monkeypatch.chdir(tmp_path)
+    cfg = load_config()
+    safety = cfg.safety
+    assert safety.max_workspace_bytes is None
+    assert safety.max_children is None
+    assert safety.max_messages_per_step is None
+    # Existing defaults unchanged.
+    assert safety.timeout_seconds == 7200.0
+    assert safety.max_iterations == 400
+    assert safety.max_agent_tokens is None
+    assert safety.max_agents == 300
+    assert safety.max_depth == 15

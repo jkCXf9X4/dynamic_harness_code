@@ -99,6 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="LLM call timeout in seconds (used by the real driver)",
     )
+    parser.add_argument(
+        "--inspect",
+        default=None,
+        help="print a read-only workspace view for AGENT_ID and exit",
+    )
     return parser
 
 
@@ -128,6 +133,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     runtime.start()
     try:
         operator = Operator(runtime=runtime, stream=sys.stdout)
+        if args.inspect is not None:
+            view = operator.inspect(args.inspect)
+            print(f"inspect {args.inspect}")
+            print(f"  status: {view.get('status')}")
+            print(f"  result: {view.get('result')}")
+            print(f"  caps: {view.get('caps')}")
+            print(f"  workspace keys: {sorted(view.get('workspace', {}))}")
+            return 0
         session = ChatSession(
             operator=operator,
             input_fn=input,

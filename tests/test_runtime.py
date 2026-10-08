@@ -997,3 +997,163 @@ def test_pump_yield_poll_non_blocking(tmp_path):
         blocking.release.set()
     finally:
         rt.stop()
+
+
+# --------------------------------------------------------------------------- #
+# IMP-001 Step 5: caps config, ensure_fabrication seam, guardrail tripwires,
+# reactions
+# --------------------------------------------------------------------------- #
+
+
+def test_caps_defaults_enforced(tmp_path):
+    """A tiny workspace cap force-stops the agent; the watchdog reads the NEW
+    config fields (SafetyConfig.max_workspace_bytes), not only module
+    constants."""
+    from dhc.config import HarnessConfig, SafetyConfig
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_workspace_bytes=1)),
+    )
+    try:
+        handle = rt.spawn("big", driver=MockDriver(["complete('done')"]))
+        completion = handle.await_()
+        assert completion.status == AgentStatus.failed
+        assert "cap exceeded" in completion.reason
+        assert "workspace_bytes" in completion.reason
+        # A crash event was emitted with the cap name and the configured limit.
+        crash = [e for e in rt.events(handle.id) if e.kind == EventKind.crash]
+        assert any(
+            e.payload.get("cap") == "workspace_bytes"
+            and e.payload.get("limit") == 1
+            for e in crash
+        )
+    finally:
+        rt.stop()
+
+
+def test_guardrail_tripwire_fires_between_steps(tmp_path):
+    """An operational tripwire (caps) is pump-evaluated between steps.
+
+    The agent's code never checks the cap; the pump's between-step watchdog
+    fires and contains the agent. The self-authored guardrail store
+    (context.guardrails) is ordinary workspace data (D5).
+    """
+    from dhc.config import HarnessConfig, SafetyConfig
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_iterations=1)),
+    )
+    try:
+        handle = rt.spawn(
+            "looper",
+            driver=MockDriver(
+                [
+                    "state['tripwire_never_checked'] = True\n"
+                    "context.guardrails['budget'] = 1\n",
+                    "complete('second step')\n",
+                ]
+            ),
+        )
+        completion = handle.await_()
+        assert completion.status == AgentStatus.failed
+        assert "cap exceeded" in completion.reason
+        assert "iterations" in completion.reason
+        # The agent's code never checked the cap (it never called caps()).
+        ws = rt.repl_engine.globals_for(handle.id)
+        assert ws["state"].get("tripwire_never_checked") is True
+        # The self-authored guardrail store is visible workspace data.
+        assert ws["context"].guardrails.get("budget") == 1
+        # A crash event was emitted with the cap name and limit.
+        crash = [e for e in rt.events(handle.id) if e.kind == EventKind.crash]
+        assert any(
+            e.payload.get("cap") == "iterations"
+            and e.payload.get("limit") == 1
+            for e in crash
+        )
+    finally:
+        rt.stop()
+
+
+def test_reaction_ships_to_parent(tmp_path):
+    """A child's reaction ships as a completion-style event on the parent's
+    stream and is executed in the parent's REPL (the on_done callback runs in
+    the parent's worker loop). The child does not execute its own
+    termination: it settles failed (its reaction is the settlement) and never
+    cancels itself."""
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path)
+    try:
+        reactions = []
+        parent = rt.spawn(
+            "parent",
+            driver=MockDriver(
+                [
+                    "c1 = spawn('child', driver=MockDriver.single(\"fail('terminate')\"), "
+                    "on_done=lambda c: reactions.append((c.agent_id, c.status, c.reason)))\n"
+                    "complete('spawned')\n"
+                ]
+            ),
+            namespace={"reactions": reactions},
+        )
+        parent.await_()
+        child_id = rt.children_of(parent.id)[0]
+        rt.await_(child_id)
+        # The parent received the child's completion-style event on its stream.
+        completions = rt.completions(parent.id)
+        assert len(completions) == 1
+        assert completions[0].agent_id == child_id
+        assert completions[0].status == AgentStatus.failed
+        assert completions[0].reason == "terminate"
+        # The reaction was executed in the parent's REPL (the callback ran).
+        assert reactions == [(child_id, AgentStatus.failed, "terminate")]
+        # The child did not execute its own termination: it settled failed
+        # (its reaction was the settlement), never cancelling itself.
+        assert rt.poll(child_id) == AgentStatus.failed
+        # The parent stayed alive and completed after the reaction.
+        assert rt.poll(parent.id) == AgentStatus.completed
+    finally:
+        rt.stop()
+
+
+def test_ensure_fabrication_reseeds(tmp_path):
+    """Agent breaks a fabrication (__runner = 42); the pump re-seeds it
+    between steps, emits a crash event with the reseeded names, and the agent
+    continues."""
+    from dhc.driver import MockDriver
+    from dhc.fabrication import DEFAULT_RUNNER_SOURCE
+
+    rt = _pumped_runtime(tmp_path)
+    try:
+        handle = rt.spawn(
+            "breaker",
+            driver=MockDriver(
+                [
+                    "__runner = 42\n",
+                    "complete('recovered')\n",
+                ]
+            ),
+        )
+        completion = handle.await_()
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "recovered"
+        # The workspace citizen was re-seeded to the default source.
+        assert (
+            rt.repl_engine.globals_for(handle.id)["__runner"]
+            == DEFAULT_RUNNER_SOURCE
+        )
+        # The re-seed emitted a crash event with the reseeded names. The
+        # default runner's observe() drains the event stream into the state
+        # digest, so the event is asserted there.
+        digest = rt.repl_engine.globals_for(handle.id)["state"]["digests"]["events"]
+        assert any(
+            e.kind == EventKind.crash
+            and e.payload.get("fabrication_reseeded") == ["__runner"]
+            for e in digest
+        )
+    finally:
+        rt.stop()

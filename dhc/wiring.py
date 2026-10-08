@@ -323,6 +323,16 @@ def _extend_namespace(
         # kit is installable and testable WITHOUT the pump (Step 3 rewrites
         # runtime.py): the default __runner is a workspace-citizen generator
         # that tests can drive directly through ReplEngine.advance.
+        # IMP-001 Step 5 (D5): the guardrail surface is complete here —
+        # (a) NORMATIVE parent-imposed constraints arrive as visible
+        # context-in at delegation via spawn(..., namespace=...) (the
+        # existing seam — no new injection channel); (b) OPERATIONAL
+        # tripwires (caps, budgets) are evaluated by the pump between steps;
+        # (c) REACTIONS ship as completion-style events on the parent's
+        # stream. The kit's context.guardrails dict is the self-authored
+        # store (ordinary workspace data, D2). The wired namespace injects a
+        # FRESH kit with fresh state — the pump seeds state["_driver"] before
+        # install and must NOT merge the kit with _build_namespace.
         kit = fabrication_kit(runtime, runtime.repl_engine, agent)
         ns.update(kit)
         return ns

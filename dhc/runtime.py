@@ -35,13 +35,14 @@ from .models import (
 
 #: Default step timeout for the pump when settings provide none (seconds).
 _DEFAULT_STEP_TIMEOUT = 120.0
-#: Caps watchdog defaults (overridable via settings; Step 5 owns full config).
+#: Caps watchdog defaults (overridable via settings; Step 5 owns full config:
+#: SafetyConfig.max_workspace_bytes / max_children / max_messages_per_step).
 _DEFAULT_TIMEOUT_SECONDS = 7200.0
 _DEFAULT_MAX_ITERATIONS = 400
 _DEFAULT_MAX_CHILDREN = 32
 _DEFAULT_MAX_WORKSPACE_BYTES = 1 << 20  # 1 MiB
-#: Message-rate cap is disabled by default (no config field yet; Step 5's
-#: job). Enforced only when settings provide ``max_messages_per_step``.
+#: Message-rate cap is disabled by default; enforced only when settings
+#: provide ``max_messages_per_step`` (Step 5 owns full config).
 _DEFAULT_MAX_MESSAGES_PER_STEP = None
 
 
@@ -506,6 +507,15 @@ class Runtime:
                         reason=f"cap exceeded: {cap}",
                     )
                     return
+                # IMP-001 Step 5 (D4): ensure the fabrication is intact
+                # between steps. A broken/deleted fabrication (e.g.
+                # ``__runner = 42``) is re-seeded here — before the runner is
+                # advanced — so the agent continues instead of failing. The
+                # re-seed emits a crash event with the reseeded names.
+                try:
+                    kit["ensure_fabrication"]()
+                except Exception:  # noqa: BLE001 - re-seed is best-effort
+                    pass
                 # Custom-runner seam: an agent that replaced the workspace
                 # `__runner` source string gets its own runner compiled from
                 # that source. Re-install only when the source changed AND is
@@ -766,7 +776,8 @@ class Runtime:
         return {
             "wall_clock": self._cap("timeout_seconds", _DEFAULT_TIMEOUT_SECONDS),
             "iterations": self._cap("max_iterations", _DEFAULT_MAX_ITERATIONS),
-            "children": self._cap("max_agents", _DEFAULT_MAX_CHILDREN),
+            "children": self._cap("max_children", None)
+            or self._cap("max_agents", _DEFAULT_MAX_CHILDREN),
             "workspace_bytes": self._cap("max_workspace_bytes", _DEFAULT_MAX_WORKSPACE_BYTES),
             "messages_per_step": self._cap("max_messages_per_step", _DEFAULT_MAX_MESSAGES_PER_STEP),
         }.get(cap)
@@ -781,8 +792,8 @@ class Runtime:
         """Return the name of the first ceiling cap exceeded, else None.
 
         Reads caps from settings None-safely (safety.timeout_seconds /
-        max_iterations / max_agents; workspace bytes and message rate from
-        module constants unless settings provide them). Tests force caps via
+        max_iterations / max_agents / max_workspace_bytes / max_children /
+        max_messages_per_step; Step 5 owns full config). Tests force caps via
         a tiny settings object.
         """
         # Wall clock (safety.timeout_seconds).
@@ -793,12 +804,14 @@ class Runtime:
         max_iterations = self._cap("max_iterations", _DEFAULT_MAX_ITERATIONS)
         if max_iterations is not None and step_count >= max_iterations:
             return "iterations"
-        # Child count (safety.max_agents, or a per-agent constant).
-        max_agents = self._cap("max_agents", _DEFAULT_MAX_CHILDREN)
-        if max_agents is not None:
+        # Child count (safety.max_children, falling back to safety.max_agents).
+        max_children = self._cap("max_children", None)
+        if max_children is None:
+            max_children = self._cap("max_agents", _DEFAULT_MAX_CHILDREN)
+        if max_children is not None:
             with self._lock:
                 child_count = len(self._agents[agent_id].children)
-            if child_count >= max_agents:
+            if child_count >= max_children:
                 return "children"
         # Workspace bytes (module constant unless settings provide one).
         max_workspace_bytes = self._cap("max_workspace_bytes", _DEFAULT_MAX_WORKSPACE_BYTES)

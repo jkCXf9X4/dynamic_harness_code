@@ -330,3 +330,66 @@ def test_cli_main_importable_without_api_key():
     parser = cli.build_parser()
     args = parser.parse_args(["--mock"])
     assert args.mock is True
+
+# --------------------------------------------------------------------------- #
+# IMP-001 Step 5: operator.inspect — read-only window into a live workspace
+# --------------------------------------------------------------------------- #
+
+
+def test_operator_inspect_readonly(tmp_path):
+    """Operator.inspect returns a workspace view without mutating anything."""
+    import time
+
+    from dhc.config import Settings
+    from dhc.driver import MockDriver
+    from dhc.models import AgentStatus
+    from dhc.wiring import build_runtime
+
+    settings = Settings(workspace_root=tmp_path, artifact_root=tmp_path)
+    rt = build_runtime(mock=True, artifact_root=tmp_path, settings=settings)
+    rt.start()
+    try:
+        handle = rt.spawn(
+            "inspect me",
+            driver=MockDriver(
+                [
+                    "x = 1\nstate['marker'] = 'set'\ncontext.guardrails['budget'] = 1\n",
+                    "import time\ntime.sleep(0.3)\ncomplete('done')\n",
+                ]
+            ),
+        )
+        # Wait until the first block has run (workspace carries the marker).
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if (
+                rt.repl_engine.globals_for(handle.id)
+                .get("state", {})
+                .get("marker")
+                == "set"
+            ):
+                break
+            time.sleep(0.005)
+        op = Operator(runtime=rt)
+        before = rt.repl_engine.globals_for(handle.id)
+        view = op.inspect(handle.id)
+        after = rt.repl_engine.globals_for(handle.id)
+        # The view carries a workspace copy + status/result/caps digest.
+        assert "workspace" in view
+        assert view["workspace"]["state"]["marker"] == "set"
+        assert view["workspace"]["context"].guardrails.get("budget") == 1
+        assert view["status"] in (
+            AgentStatus.running.value,
+            AgentStatus.completed.value,
+        )
+        assert isinstance(view["caps"], dict)
+        assert "max_workspace_bytes" in view["caps"]
+        # The workspace was NOT mutated by inspect (no new keys, no state
+        # change) and the agent keeps running.
+        assert set(before) == set(after)
+        assert dict(before["state"]) == dict(after["state"])
+        assert before["context"].guardrails == after["context"].guardrails
+        completion = handle.await_()
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "done"
+    finally:
+        rt.stop()
