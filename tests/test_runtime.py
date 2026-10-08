@@ -849,3 +849,151 @@ def test_pump_cancellation_grace_kill_rollback_settle(tmp_path):
         assert "x" not in rt.repl_engine.globals_for(handle.id)
     finally:
         rt.stop()
+
+# --------------------------------------------------------------------------- #
+# IMP-001 Step 4: yield vocabulary (Await / Poll / Sleep) serviced by the pump
+# --------------------------------------------------------------------------- #
+# D3 (yield-async split): direct workspace calls stay synchronous; only
+# indefinite/off-thread ops are `yield` requests serviced by the pump. The
+# parent's runner is parked (engine.suspend) while an Await/Sleep is serviced,
+# so the parent's step budget is NOT consumed while parked.
+
+
+def test_pump_yield_await_parent_not_starved(tmp_path):
+    """D3: `yield Await(child)` parks the parent without burning its budget.
+
+    The parent's runner is parked while the child sleeps; the parent's loop
+    stays responsive (a sibling completes and its completion is delivered to
+    the parent's stream during the wait) and the parent's step count does not
+    advance while parked.
+    """
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path)
+    try:
+        slow_child = MockDriver.single(
+            "import time\ntime.sleep(1.0)\ncomplete('slow child done')"
+        )
+        fast_child = MockDriver.single("complete('fast sibling done')")
+        parent = rt.spawn(
+            "parent",
+            driver=MockDriver(
+                [
+                    "__runner = '''def __runner__(ctx):\n"
+                    "    c1 = spawn('slow child', driver=slow_child)\n"
+                    "    c2 = spawn('fast sibling', driver=fast_child)\n"
+                    "    ctx['state']['await_started'] = True\n"
+                    "    yield Await(c1)\n"
+                    "    complete('parent done')\n"
+                    "'''\n"
+                ]
+            ),
+            namespace={"slow_child": slow_child, "fast_child": fast_child},
+        )
+        # The parent's runner is parked on Await(c1) once the flag is set.
+        assert wait_for(
+            lambda: rt.repl_engine.globals_for(parent.id)
+            .get("state", {})
+            .get("await_started")
+        )
+        slow_id, fast_id = rt.children_of(parent.id)
+        # The fast sibling completes during the wait...
+        assert rt.await_(fast_id).status == AgentStatus.completed
+        # ...and its completion is delivered to the parent's stream while the
+        # parent is still parked (the parent's loop stayed responsive).
+        assert wait_for(
+            lambda: any(c.agent_id == fast_id for c in rt.completions(parent.id))
+        )
+        assert rt.poll(parent.id) == AgentStatus.running
+        # The parent's runner was NOT advanced while parked: no new
+        # turn_started events are emitted while the parent waits (the parent's
+        # own observe() drains its stream, so assert on the absence of NEW
+        # steps rather than an absolute count).
+        time.sleep(0.2)
+        assert not any(
+            e.kind == EventKind.turn_started and e.payload.get("step", 0) > 2
+            for e in rt.events(parent.id)
+        )
+        # Once the slow child settles, the parent resumes and completes.
+        completion = parent.await_()
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "parent done"
+    finally:
+        rt.stop()
+
+
+def test_pump_yield_sleep_parks_and_resumes(tmp_path):
+    """`yield Sleep(t)` parks the runner and resumes it after ~t."""
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path)
+    try:
+        handle = rt.spawn(
+            "sleeper",
+            driver=MockDriver(
+                [
+                    "__runner = '''def __runner__(ctx):\n"
+                    "    ctx['state']['sleep_started'] = True\n"
+                    "    yield Sleep(0.3)\n"
+                    "    complete('slept')\n"
+                    "'''\n"
+                ]
+            ),
+        )
+        # The runner parks itself: wait for the flag, then wait until the
+        # pump has actually parked the runner (engine-side state), then
+        # advance returns "suspended" while the pump services the Sleep.
+        assert wait_for(
+            lambda: rt.repl_engine.globals_for(handle.id)
+            .get("state", {})
+            .get("sleep_started")
+        )
+        assert wait_for(
+            lambda: rt.repl_engine._runner_states.get(handle.id) == "suspended"
+        )
+        assert rt.repl_engine.advance(handle.id).kind == "suspended"
+        t0 = time.monotonic()
+        completion = handle.await_()
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "slept"
+        # The runner resumed only after the sleep elapsed.
+        assert time.monotonic() - t0 >= 0.2
+    finally:
+        rt.stop()
+
+
+def test_pump_yield_poll_non_blocking(tmp_path):
+    """`yield Poll(child)` returns the child's status without blocking."""
+    from dhc.driver import MockDriver
+
+    rt = _pumped_runtime(tmp_path)
+    try:
+        blocking = BlockingDriver()
+        handle = rt.spawn(
+            "polling parent",
+            driver=MockDriver(
+                [
+                    "__runner = '''import time\n"
+                    "def __runner__(ctx):\n"
+                    "    c1 = spawn('child', driver=blocking_driver)\n"
+                    "    ctx['state']['t0'] = time.monotonic()\n"
+                    "    yield Poll(c1)\n"
+                    "    ctx['state']['t1'] = time.monotonic()\n"
+                    "    ctx['state']['poll_status'] = ctx['state']['yield_result']\n"
+                    "    complete('polled')\n"
+                    "'''\n"
+                ]
+            ),
+            namespace={"blocking_driver": blocking},
+        )
+        completion = handle.await_()
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "polled"
+        state = rt.repl_engine.globals_for(handle.id)["state"]
+        # The Poll did not block: the yield round-trip was fast.
+        assert state["t1"] - state["t0"] < 0.5
+        # The child's current status was delivered back into the generator.
+        assert state["poll_status"] in (AgentStatus.pending, AgentStatus.running)
+        blocking.release.set()
+    finally:
+        rt.stop()

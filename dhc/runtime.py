@@ -20,7 +20,7 @@ from typing import Any, Callable, Optional
 
 from .agent import Agent, AgentHandle, bash
 from .errors import ChannelError, TurnError, TurnTimeoutError
-from .fabrication import fabrication_kit, make_default_runner
+from .fabrication import DEFAULT_RUNNER_SOURCE, fabrication_kit
 from .models import (
     TERMINAL_STATES,
     AgentStatus,
@@ -106,6 +106,52 @@ class _MemoryStore:
     def get(self, artifact_id: str) -> Optional[Artifact]:
         with self._lock:
             return self._artifacts.get(artifact_id)
+
+
+# --------------------------------------------------------------------------- #
+# Yield vocabulary (IMP-001 Step 4, D3: yield-async split)
+# --------------------------------------------------------------------------- #
+
+
+class Await:
+    """Yield request: park the parent's runner until *handle*'s agent settles.
+
+    The parent's runner is NOT advanced while parked (D3): the parent's step
+    budget is not consumed. *handle* is an ``AgentHandle`` (or anything with
+    ``.id``, ``.poll() -> AgentStatus`` and ``.await_() -> Completion``).
+    """
+
+    __slots__ = ("handle",)
+
+    def __init__(self, handle: Any) -> None:
+        self.handle = handle
+
+
+class Poll:
+    """Yield request: return *handle*'s current ``AgentStatus`` without blocking.
+
+    The pump delivers the status back into the generator under the well-known
+    name ``yield_result`` (workspace) and ``state["yield_result"]`` (the
+    runner's ctx slot) before the runner is advanced again.
+    """
+
+    __slots__ = ("handle",)
+
+    def __init__(self, handle: Any) -> None:
+        self.handle = handle
+
+
+class Sleep:
+    """Yield request: park the parent's runner for *seconds* (stop-flag aware).
+
+    The parent's runner is NOT advanced while parked (D3): the parent's step
+    budget is not consumed.
+    """
+
+    __slots__ = ("seconds",)
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
 
 
 # --------------------------------------------------------------------------- #
@@ -413,8 +459,17 @@ class Runtime:
         kit = fabrication_kit(self, engine, agent)
         if driver is not None:
             kit["state"]["_driver"] = driver
+        # The yield vocabulary (D3) is part of the in-code surface: agent
+        # code and agent-authored runners can `yield Await(c1)` etc. The kit
+        # doubles as the runner's ctx. NOTE: the kit must NOT be merged with
+        # _build_namespace here — the wired namespace (wiring.py) injects a
+        # FRESH fabrication kit (fresh state dict, __runner=DEFAULT), which
+        # would clobber the seeded _driver and the kit's state.
+        kit["Await"] = Await
+        kit["Poll"] = Poll
+        kit["Sleep"] = Sleep
         engine.inject(agent_id, kit)
-        engine.install(agent_id, make_default_runner(engine, agent_id, kit))
+        installed_source = self._install_runner(engine, agent_id, kit)
 
         step_count = 0
         started_ts = time.time()
@@ -451,10 +506,74 @@ class Runtime:
                         reason=f"cap exceeded: {cap}",
                     )
                     return
+                # Custom-runner seam: an agent that replaced the workspace
+                # `__runner` source string gets its own runner compiled from
+                # that source. Re-install only when the source changed AND is
+                # not the default source: the wired namespace re-injects the
+                # default `__runner` on every run_block, so a custom runner
+                # that calls run_block must NOT be replaced by the default
+                # runner (we are between steps here, so the runner is never
+                # parked).
+                source = engine.globals_for(agent_id).get("__runner")
+                if (
+                    isinstance(source, str)
+                    and source != installed_source
+                    and source != DEFAULT_RUNNER_SOURCE
+                ):
+                    installed_source = self._install_runner(engine, agent_id, kit, source)
                 step_count += 1
                 self._emit(agent_id, EventKind.turn_started, payload={"step": step_count})
                 outcome = engine.advance(agent_id, timeout=self._step_timeout())
                 if outcome.kind == "yield":
+                    value = outcome.value
+                    if isinstance(value, Await):
+                        # D3: park the parent's runner until the child
+                        # settles; the parent's step budget is NOT consumed
+                        # while parked.
+                        self._emit(
+                            agent_id,
+                            EventKind.turn_completed,
+                            payload={"ok": True, "step": step_count, "yield": "await"},
+                        )
+                        if not self._service_await(agent_id, engine, value.handle):
+                            try:
+                                engine.kill(agent_id)
+                            except Exception:  # noqa: BLE001 - kill is best-effort
+                                pass
+                            self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
+                            return
+                        continue
+                    if isinstance(value, Sleep):
+                        self._emit(
+                            agent_id,
+                            EventKind.turn_completed,
+                            payload={"ok": True, "step": step_count, "yield": "sleep"},
+                        )
+                        if not self._service_sleep(agent_id, engine, value.seconds):
+                            try:
+                                engine.kill(agent_id)
+                            except Exception:  # noqa: BLE001 - kill is best-effort
+                                pass
+                            self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
+                            return
+                        continue
+                    if isinstance(value, Poll):
+                        # Non-blocking: deliver the child's current status
+                        # back INTO the generator. No "send value back"
+                        # primitive exists, so the result is injected under
+                        # the well-known name `yield_result` (workspace) and
+                        # `state["yield_result"]` (the runner's ctx slot).
+                        # The handle may be an AgentHandle or an Agent (spawn
+                        # returns the Agent); both carry `.id`.
+                        status = self.poll(getattr(value.handle, "id", value.handle))
+                        kit["state"]["yield_result"] = status
+                        engine.inject(agent_id, {"yield_result": status})
+                        self._emit(
+                            agent_id,
+                            EventKind.turn_completed,
+                            payload={"ok": True, "step": step_count, "yield": "poll"},
+                        )
+                        continue
                     self._emit(
                         agent_id,
                         EventKind.turn_completed,
@@ -546,6 +665,89 @@ class Runtime:
                 return
         except Exception as exc:  # noqa: BLE001 - last-resort containment
             self._settle(agent_id, AgentStatus.failed, reason=f"worker crashed: {exc}")
+
+    def _install_runner(
+        self,
+        engine: Any,
+        agent_id: str,
+        kit: dict,
+        source: Optional[str] = None,
+    ) -> str:
+        """Compile and install the agent's ``__runner`` generator.
+
+        The source defaults to the kit's ``__runner`` (the default runner
+        source injected by the fabrication kit). The runner is compiled with
+        the workspace surface + kit as globals — so agent-authored runners can
+        reference in-code names (``spawn``, ``complete``, ``Await``, ...)
+        directly — and receives the kit as its ``ctx`` argument. Returns the
+        installed source (the re-install seam compares it with the workspace
+        ``__runner`` string).
+        """
+        if source is None:
+            source = kit.get("__runner")
+        if not isinstance(source, str):
+            source = DEFAULT_RUNNER_SOURCE
+        ns: dict = {"__builtins__": __builtins__}
+        ns.update(engine.globals_for(agent_id))
+        ns.update(kit)
+        exec(compile(source, f"<runner:{agent_id}>", "exec"), ns)
+        engine.install(agent_id, ns["__runner__"](kit))
+        return source
+
+    def _service_await(self, agent_id: str, engine: Any, handle: Any) -> bool:
+        """Park *agent_id*'s runner until *handle*'s agent settles, then resume.
+
+        The parent's runner is NOT advanced while parked (D3): step_count does
+        not increment and the step budget is not consumed. Completion wakeups
+        ride the existing CompletionDispatcher (INFO-047): the parent's
+        pending completions are drained each poll so the parent's stream keeps
+        moving while it waits.
+
+        Returns True when the runner was resumed; False when the parent was
+        cancelled while parked (the caller must kill the runner and settle).
+        """
+        engine.suspend(agent_id)
+        # The handle may be an AgentHandle or an Agent (spawn returns the
+        # Agent); both carry `.id`. Poll via the runtime so either works.
+        child_id = getattr(handle, "id", handle)
+        try:
+            while True:
+                if self._stop_flags[agent_id].is_set():
+                    return False
+                self._drain_completions(agent_id)
+                try:
+                    status = self.poll(child_id)
+                except KeyError:
+                    # The awaited agent vanished (should not happen); treat it
+                    # as settled so the parent does not hang.
+                    return True
+                if is_terminal(status):
+                    return True
+                time.sleep(0.01)
+        finally:
+            engine.resume(agent_id)
+
+    def _service_sleep(self, agent_id: str, engine: Any, seconds: float) -> bool:
+        """Park *agent_id*'s runner for *seconds* (honoring the stop flag).
+
+        The parent's runner is NOT advanced while parked (D3): step_count does
+        not increment and the step budget is not consumed.
+
+        Returns True when the runner was resumed; False when the parent was
+        cancelled while parked (the caller must kill the runner and settle).
+        """
+        engine.suspend(agent_id)
+        try:
+            deadline = time.monotonic() + seconds
+            while True:
+                if self._stop_flags[agent_id].is_set():
+                    return False
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return True
+                time.sleep(min(0.01, remaining))
+        finally:
+            engine.resume(agent_id)
 
     def _cap(self, name: str, default: Any) -> Any:
         """Read a cap from settings None-safely (safety config first)."""
@@ -640,6 +842,9 @@ class Runtime:
             "await_": agent.await_,
             "poll": agent.poll,
             "children_of": agent.children_of,
+            "Await": Await,
+            "Poll": Poll,
+            "Sleep": Sleep,
         }
         extra = self._extra_namespace.get(agent.id)
         if extra:
