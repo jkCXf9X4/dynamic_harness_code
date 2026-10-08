@@ -10,6 +10,10 @@ today's behavior exactly:
   LLM/Mock brain; ``driver.__call__`` becomes the default decide and its
   bookkeeping (``_turns``/``_calls``) moves into workspace state.
 * ``run_block`` — non-locking nested exec against the workspace.
+* ``build_prompt`` — the default prompt assembly (G-02): a kit citizen
+  wrapping the byte-identical extraction of the historical
+  ``LLMDriver._build_prompt``; an agent that replaces it changes the prompt
+  the LLM receives.
 * ``context`` — guardrails/inbox/outbox/budgets/digests as ordinary workspace
   data (full transparency, D2).
 * channel handles (``messenger``, ``room``, ``escalate``, ``ask``).
@@ -27,7 +31,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ..agent.context import make_observe as _context_make_observe
-from .driver import driver_from_settings
+from .driver import default_build_prompt, driver_from_settings
 from ..data.models import AgentStatus, EventKind
 
 #: The default agent loop, authored as workspace code (IMP-001 D4).
@@ -64,6 +68,7 @@ FABRICATION_NAMES: tuple[str, ...] = (
     "rollback",
     "compact",
     "caps",
+    "build_prompt",
 )
 
 
@@ -132,6 +137,18 @@ def make_decide(driver: Any, agent: Any, state: dict) -> Callable[[Any], Optiona
         return brain(d["agent"])
 
     return decide
+
+
+# -- build_prompt (G-02: prompt assembly as a workspace citizen) ------------ #
+#
+# The kit citizen is ``default_build_prompt`` itself (the byte-identical
+# extraction of the historical ``LLMDriver._build_prompt``): the agent can
+# read its own default assembly source directly. An agent swaps prompt
+# assembly by replacing it — either the workspace name (honored until the
+# next per-turn namespace refresh) or, persistently, the
+# ``state["build_prompt"]`` slot (the same seam as ``state["_driver"]``;
+# the state dict survives the refresh). The driver resolves both before
+# falling back to the default; see ``LLMDriver._build_prompt``.
 
 
 # -- run_block ------------------------------------------------------------- #
@@ -355,6 +372,12 @@ def make_ensure_fabrication(
             engine.inject(agent_id, {"run_block": kit["run_block"]})
             reseeded.append("run_block")
 
+        bp = ws.get("build_prompt")
+        if not callable(bp):
+            kit = kit_builder()
+            engine.inject(agent_id, {"build_prompt": kit["build_prompt"]})
+            reseeded.append("build_prompt")
+
         if reseeded:
             runtime._emit(
                 agent_id,
@@ -432,6 +455,12 @@ def fabrication_kit(runtime: Any, engine: Any, agent: Any) -> dict:
         "rollback": rollback,
         "compact": compact,
         "caps": caps,
+        # G-02: prompt assembly as a workspace citizen. The default IS the
+        # byte-identical extraction of the historical LLMDriver._build_prompt
+        # (the agent can read its own default assembly source directly). An
+        # agent swaps it by replacing the workspace name or, persistently,
+        # state["build_prompt"] — the same seam as state["_driver"].
+        "build_prompt": default_build_prompt,
         # The runner's context (also namespace citizens; harmless extras):
         "state": state,
         "observe": observe,

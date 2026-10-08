@@ -176,3 +176,117 @@ def test_golden_default_prompt_no_acceptance_no_context():
         "Current status: done=False ok=False reason='not settled'"
     )
     assert driver._build_prompt(agent) == expected
+
+
+# --------------------------------------------------------------------------- #
+# The kit citizen: build_prompt installed in the workspace
+# --------------------------------------------------------------------------- #
+
+
+def test_build_prompt_is_a_kit_citizen(tmp_path):
+    """The fabrication kit installs ``build_prompt`` in the workspace."""
+    from dhc.llm.fabrication import FABRICATION_NAMES
+
+    rt = build_runtime(mock=True, artifact_root=str(tmp_path))
+    try:
+        agent = _register_agent(rt)
+        ns = rt._build_namespace(agent)
+        assert "build_prompt" in FABRICATION_NAMES
+        assert callable(ns["build_prompt"])
+        # The default citizen reproduces the golden prompt byte-identically.
+        fake = _FakeAgent()
+        assert ns["build_prompt"](fake) == GOLDEN_PROMPT
+    finally:
+        rt.stop()
+
+
+def test_agent_replacing_build_prompt_changes_the_llm_prompt(tmp_path):
+    """G-02 criterion 2 (end-to-end through the pump): an agent that
+    replaces the workspace ``build_prompt`` from workspace code changes
+    the prompt the LLM receives.
+
+    Turn 1: the LLM gets the DEFAULT prompt and returns a block that
+    installs a custom assembly into the persistent ``state`` slot. Turn
+    2: the LLM must receive the CUSTOM prompt.
+    """
+    seen = []
+
+    def fake_llm(prompt, context=None):
+        seen.append(prompt)
+        if len(seen) == 1:
+            # Turn 1: swap the prompt assembly from workspace code. The
+            # state slot persists across the per-turn namespace refresh
+            # (the same seam as state["_driver"]).
+            return (
+                "def _my_prompt(agent, driver=None):\n"
+                "    return 'CUSTOM PROMPT: ' + agent.requirement\n"
+                "state['build_prompt'] = _my_prompt\n"
+            )
+        return "result = complete('done')"
+
+    rt = build_runtime(mock=True, artifact_root=str(tmp_path))
+    try:
+        root = rt.spawn(
+            "observe the swap",
+            acceptance=("done",),
+            driver=LLMDriver(client=MockLLM(fn=fake_llm)),
+        )
+        comp = rt.await_(root.id)
+        assert comp.status.value == "completed", comp.reason
+        assert len(seen) == 2, f"expected two LLM calls, saw {len(seen)}"
+        # Turn 1 carried the default assembly...
+        assert seen[0].startswith("You are the action generator")
+        assert "Requirement: observe the swap" in seen[0]
+        # ...and turn 2 carried the agent's replacement.
+        assert seen[1] == "CUSTOM PROMPT: observe the swap"
+    finally:
+        rt.stop()
+
+
+def test_swapped_build_prompt_reaches_the_llm(tmp_path):
+    """Unit-level: the workspace-name override is what the LLM sees."""
+    from dhc.llm.fabrication import fabrication_kit
+
+    seen = []
+
+    def fake_llm(prompt, context=None):
+        seen.append(prompt)
+        return "result = complete('done')"
+
+    rt = build_runtime(mock=True, artifact_root=str(tmp_path))
+    try:
+        agent = _register_agent(rt, requirement="unit swap")
+        engine = rt.repl_engine
+        kit = fabrication_kit(rt, engine, agent)
+        engine.inject(agent.id, kit)
+
+        # The agent replaced its prompt assembly from workspace code: the
+        # workspace name now holds the custom function.
+        def custom(agent, driver=None):
+            return "CUSTOM: " + agent.requirement
+
+        engine.inject(agent.id, {"build_prompt": custom})
+        driver = LLMDriver(client=MockLLM(fn=fake_llm))
+        code = driver(agent)
+        assert code == "result = complete('done')"
+        assert seen == ["CUSTOM: unit swap"]
+    finally:
+        rt.stop()
+
+
+def _register_agent(rt, agent_id="a1", requirement="r"):
+    """Register an agent on the runtime WITHOUT starting a worker thread."""
+    import threading
+
+    from dhc.agent.agent import Agent, AgentHandle
+
+    agent = Agent(
+        id=agent_id,
+        requirement=requirement,
+        runtime=rt,
+        artifact_store=rt.artifact_store,
+    )
+    rt._agents[agent_id] = agent
+    rt._handles[agent_id] = AgentHandle(agent_id, rt)
+    rt._stop_flags[agent_id] = threading.Event()
+    return agent
