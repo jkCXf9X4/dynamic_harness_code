@@ -1157,3 +1157,243 @@ def test_ensure_fabrication_reseeds(tmp_path):
         )
     finally:
         rt.stop()
+
+
+# --------------------------------------------------------------------------- #
+# G-01: agent-set working budgets enforced by the pump, clamped to ceilings.
+# The effective limit is min(agent_budget, runtime_ceiling), evaluated in
+# runtime/pump code — agent data can only TIGHTEN a limit, never loosen it.
+# --------------------------------------------------------------------------- #
+
+
+def test_g01_agent_budget_tightens_iterations_cap(tmp_path):
+    """G-01 (1): the agent sets context.budgets['max_iterations']=2 with a
+    ceiling of 10 -> the pump stops it at 2 steps with a crash event naming
+    the budget kind and the effective limit (2, the agent's own budget)."""
+    from dhc.data.config import HarnessConfig, SafetyConfig
+    from dhc.llm.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_iterations=10)),
+    )
+    try:
+        handle = rt.spawn(
+            "budgeted",
+            driver=MockDriver(
+                [
+                    "context.budgets['max_iterations'] = 2\n",
+                    "state['step_two'] = True\n",
+                    "state['step_three'] = True\n",
+                    "complete('never reached')\n",
+                ]
+            ),
+        )
+        completion = handle.await_()
+        assert completion.status == AgentStatus.failed
+        assert "cap exceeded" in completion.reason
+        assert "iterations" in completion.reason
+        # The agent ran exactly 2 steps (the third block never executed).
+        ws = rt.repl_engine.globals_for(handle.id)
+        assert ws["state"].get("step_two") is True
+        assert "step_three" not in ws["state"]
+        # The budget survived as ordinary workspace data.
+        assert ws["context"].budgets.get("max_iterations") == 2
+        # A crash event was emitted naming the budget kind and the
+        # effective limit (the agent's own budget, which tightened the
+        # ceiling of 10).
+        crash = [e for e in rt.events(handle.id) if e.kind == EventKind.crash]
+        assert any(
+            e.payload.get("cap") == "iterations"
+            and e.payload.get("limit") == 2
+            and e.payload.get("source") == "agent_budget"
+            for e in crash
+        )
+    finally:
+        rt.stop()
+
+
+def test_g01_agent_budget_above_ceiling_is_clamped(tmp_path):
+    """G-01 (2): an agent budget ABOVE the ceiling is clamped to the
+    ceiling; the crash event reports the ceiling value. The agent can never
+    loosen a runtime ceiling (guarantee R3)."""
+    from dhc.data.config import HarnessConfig, SafetyConfig
+    from dhc.llm.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_iterations=2)),
+    )
+    try:
+        handle = rt.spawn(
+            "greedy",
+            driver=MockDriver(
+                [
+                    "context.budgets['max_iterations'] = 999\n",
+                    "state['step_two'] = True\n",
+                    "state['step_three'] = True\n",
+                    "complete('never reached')\n",
+                ]
+            ),
+        )
+        completion = handle.await_()
+        assert completion.status == AgentStatus.failed
+        assert "cap exceeded" in completion.reason
+        assert "iterations" in completion.reason
+        # The agent ran exactly 2 steps (the ceiling, not the 999 budget).
+        ws = rt.repl_engine.globals_for(handle.id)
+        assert ws["state"].get("step_two") is True
+        assert "step_three" not in ws["state"]
+        # The crash event reports the CEILING value (2), not the agent's
+        # 999 — the clamp is min(agent, ceiling).
+        crash = [e for e in rt.events(handle.id) if e.kind == EventKind.crash]
+        assert any(
+            e.payload.get("cap") == "iterations"
+            and e.payload.get("limit") == 2
+            for e in crash
+        )
+        # No agent_budget source: the effective limit came from the ceiling.
+        assert all(
+            e.payload.get("source") != "agent_budget"
+            for e in crash
+            if e.payload.get("cap") == "iterations"
+        )
+    finally:
+        rt.stop()
+
+
+def test_g01_invalid_budgets_are_ignored(tmp_path):
+    """G-01 (3a): wrong type / None / <=0 budgets are treated as unset — the
+    ceiling alone governs, exactly as before."""
+    from dhc.data.config import HarnessConfig, SafetyConfig
+    from dhc.llm.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_iterations=10)),
+    )
+    try:
+        handle = rt.spawn(
+            "sloppy",
+            driver=MockDriver(
+                [
+                    "context.budgets['max_iterations'] = 'two'\n"
+                    "context.budgets['wall_clock'] = None\n"
+                    "context.budgets['max_children'] = 0\n"
+                    "context.budgets['max_workspace_bytes'] = -5\n",
+                    "state['step_two'] = True\n",
+                    "state['step_three'] = True\n",
+                    "complete('done')\n",
+                ]
+            ),
+        )
+        completion = handle.await_()
+        # The invalid budgets never tightened anything: the agent ran its
+        # full 4-block script under the ceiling of 10 and completed. (A
+        # junk value read as a limit would have stopped it at step 1.)
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "done"
+        ws = rt.repl_engine.globals_for(handle.id)
+        assert ws["state"].get("step_three") is True
+        # The junk values are still visible as ordinary workspace data.
+        assert ws["context"].budgets.get("max_iterations") == "two"
+    finally:
+        rt.stop()
+
+
+def test_g01_deleted_budgets_behave_as_before(tmp_path):
+    """G-01 (3b): an agent that sets and then deletes its budget runs under
+    the ceiling alone — behavior identical to never having set it."""
+    from dhc.data.config import HarnessConfig, SafetyConfig
+    from dhc.llm.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_iterations=10)),
+    )
+    try:
+        handle = rt.spawn(
+            "fickle",
+            driver=MockDriver(
+                [
+                    "context.budgets['max_iterations'] = 5\n",
+                    "del context.budgets['max_iterations']\n"
+                    "state['step_two'] = True\n",
+                    "state['step_three'] = True\n",
+                    "state['step_four'] = True\n",
+                    "state['step_five'] = True\n",
+                    "state['step_six'] = True\n",
+                    "complete('done')\n",
+                ]
+            ),
+        )
+        completion = handle.await_()
+        # The deleted budget no longer binds: the agent ran its full
+        # 7-block script (past the deleted budget of 5) under the ceiling
+        # of 10 and completed. (Had the budget of 5 still bound, the agent
+        # would have been stopped at step 5 — step_six absent.)
+        assert completion.status == AgentStatus.completed
+        assert completion.summary == "done"
+        ws = rt.repl_engine.globals_for(handle.id)
+        assert ws["state"].get("step_two") is True
+        assert ws["state"].get("step_six") is True
+        assert "max_iterations" not in ws["context"].budgets
+    finally:
+        rt.stop()
+
+
+def test_g01_agent_budget_fires_from_pump_unchecked(tmp_path):
+    """G-01 (4): mirror of test_d5b — an agent-set budget fires from the
+    pump though the agent's code never checks it. The agent is contained;
+    the mesh stays alive."""
+    from dhc.data.config import HarnessConfig, SafetyConfig
+    from dhc.llm.driver import MockDriver
+
+    rt = _pumped_runtime(
+        tmp_path,
+        config=HarnessConfig(safety=SafetyConfig(max_iterations=10)),
+    )
+    try:
+        handle = rt.spawn(
+            "looper",
+            driver=MockDriver(
+                [
+                    "state['tripwire_never_checked'] = True\n"
+                    "context.budgets['max_iterations'] = 2\n",
+                    "state['step_two'] = True\n",
+                    "state['step_three'] = True\n",
+                    "complete('never reached')\n",
+                ]
+            ),
+        )
+        completion = handle.await_()
+        assert completion.status == AgentStatus.failed
+        assert "cap exceeded" in completion.reason
+        assert "iterations" in completion.reason
+        # The agent's code never checked the budget (it never called
+        # caps()); the pump's between-step watchdog fired it.
+        ws = rt.repl_engine.globals_for(handle.id)
+        assert ws["state"].get("tripwire_never_checked") is True
+        assert ws["state"].get("step_two") is True
+        assert "step_three" not in ws["state"]
+        # The budget is ordinary workspace data.
+        assert ws["context"].budgets.get("max_iterations") == 2
+        # A crash event was emitted with the cap name, the effective
+        # limit, and the agent-budget source.
+        crash = [e for e in rt.events(handle.id) if e.kind == EventKind.crash]
+        assert any(
+            e.payload.get("cap") == "iterations"
+            and e.payload.get("limit") == 2
+            and e.payload.get("source") == "agent_budget"
+            for e in crash
+        )
+        # Mesh alive: a sibling spawned after still completes (its
+        # acceptance is met in a single step, before any budget trips).
+        sibling = rt.spawn(
+            "sibling",
+            acceptance=("ok",),
+            driver=MockDriver(["complete('fine')"]),
+        )
+        assert sibling.await_().status == AgentStatus.completed
+    finally:
+        rt.stop()

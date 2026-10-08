@@ -352,19 +352,24 @@ class Runtime:
         """The configured limit for a cap name (for the crash event payload)."""
         return _caps.cap_limit(cap, self.settings)
 
-    def _caps_watchdog(
+    def _caps_hit(
         self,
         agent_id: str,
         engine: Any,
         step_count: int,
         started_ts: float,
-    ) -> Optional[str]:
-        """Return the name of the first ceiling cap exceeded, else None.
+    ) -> Optional[dict]:
+        """The first exceeded cap as ``{"cap", "limit", "source"}``, else None.
 
-        Moved to :func:`dhc.agent.caps.caps_exceeded`; this wrapper supplies
-        the runtime-state reads as lazy thunks (the lock-guarded child count
-        and the event-bus drain — the drain runs only when the message-rate
-        cap is enabled, exactly as before).
+        G-01: the ceiling-caps predicate with the agent's working budgets
+        (``context.budgets``) min-clamped onto each ceiling — the effective
+        limit is ``min(agent_budget, ceiling)``, evaluated here in runtime
+        code (never in agent code). ``limit`` is the effective (binding)
+        value; ``source`` names its origin (``"agent_budget"`` /
+        ``"ceiling"``). Supplies the runtime-state reads as lazy thunks
+        (the lock-guarded child count and the event-bus drain — the drain
+        runs only when the message-rate cap is enabled, exactly as
+        before).
         """
 
         def _child_count() -> int:
@@ -400,7 +405,7 @@ class Runtime:
                 self._caps_cursors[agent_id] = len(events)
             return fresh
 
-        return _caps.caps_exceeded(
+        return _caps.cap_hit(
             agent_id,
             engine,
             step_count,
@@ -409,6 +414,22 @@ class Runtime:
             child_count=_child_count,
             pending_messages=_pending_messages,
         )
+
+    def _caps_watchdog(
+        self,
+        agent_id: str,
+        engine: Any,
+        step_count: int,
+        started_ts: float,
+    ) -> Optional[str]:
+        """Return the name of the first ceiling cap exceeded, else None.
+
+        The historical contract (a cap-name string), kept for existing
+        callers; the pump reads the enriched view via :meth:`_caps_hit`
+        (G-01: effective limit + source for the crash-event payload).
+        """
+        hit = self._caps_hit(agent_id, engine, step_count, started_ts)
+        return hit["cap"] if hit is not None else None
 
     # -- namespace -----------------------------------------------------------
 

@@ -290,13 +290,23 @@ def pump_loop(
             # Completion callbacks run between the parent's own actions,
             # in completion order (INFO-039/047).
             runtime._drain_completions(agent_id)
-            # Caps watchdog: ceiling caps are hard gates (D2).
-            cap = runtime._caps_watchdog(agent_id, engine, step_count, started_ts)
-            if cap is not None:
+            # Caps watchdog: ceiling caps are hard gates (D2). G-01: the
+            # agent's working budgets (context.budgets) are min-clamped
+            # onto the ceilings inside the predicate — the effective limit
+            # is min(agent_budget, ceiling), evaluated here in pump code
+            # (never in agent code), so an agent budget can only tighten a
+            # limit, never loosen one (R3).
+            hit = runtime._caps_hit(agent_id, engine, step_count, started_ts)
+            if hit is not None:
+                cap = hit["cap"]
                 runtime._emit(
                     agent_id,
                     EventKind.crash,
-                    payload={"cap": cap, "limit": runtime._cap_limit(cap)},
+                    payload={
+                        "cap": cap,
+                        "limit": hit["limit"],
+                        "source": hit["source"],
+                    },
                 )
                 try:
                     engine.kill(agent_id)
