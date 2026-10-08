@@ -173,6 +173,17 @@ class _WiredBus:
             return self._dispatcher.drain_for(agent_id)
         raise ValueError(f"unknown bus topic {topic!r}")
 
+    def peek(self, topic: str) -> list:
+        """Return the topic's events without consuming them (fan-out seam).
+
+        Mirrors :meth:`drain` for the ``events:*`` topics only: the
+        ``completions:*`` topics stay destructive (INFO-046 at-most-once).
+        """
+        if topic.startswith("events:"):
+            agent_id = topic[len("events:") :]
+            return self._bus.stream_for(agent_id).peek()
+        raise ValueError(f"unknown bus topic {topic!r}")
+
 
 class _ReplEngineAdapter:
     """Translate the ReplEngine's Result-returning contract into the

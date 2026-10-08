@@ -6,7 +6,7 @@ cancellation (INFO-034/040). The worker loop (driver -> turn -> settle) and
 the pumped ``__runner`` path live in :mod:`dhc.agent.loop`; the ceiling-caps
 watchdog predicate lives in :mod:`dhc.agent.caps`; the fabrication
 ensure/re-seed helper lives in :mod:`dhc.agent.integrity`. This module keeps
-the runtime state (the 15 dicts/flags + the one RLock), settlement, the
+the runtime state (the 17 dicts/flags + the one RLock), settlement, the
 namespace build, the public supervision API, and thin method wrappers over
 every moved name — the re-export seam — so existing imports (including
 tests importing privates) keep working.
@@ -111,6 +111,17 @@ class _MemoryBus:
             self._queues[topic] = []
             return items
 
+    def peek(self, topic: str) -> list:
+        """Return the topic's events without consuming them (fan-out seam).
+
+        The drain-race fix: consumers of the ``events:<id>`` topics read
+        through this non-destructive peek and keep their own cursor, so no
+        consumer steals another's events. ``drain`` stays destructive (the
+        ``completions:<id>`` contract, INFO-046 at-most-once).
+        """
+        with self._lock:
+            return list(self._queues.get(topic, []))
+
 
 class _MemoryStore:
     """A simple in-memory artifact store (content-addressed)."""
@@ -183,6 +194,14 @@ class Runtime:
         self._host_callbacks: dict[str, list[Callable[[Completion], None]]] = {}
         # Delivered completions per parent (the parent's completion stream).
         self._delivered: dict[str, list[Completion]] = {}
+        # Per-agent read cursors over the non-destructive ``events:<id>``
+        # peek (the drain-race fix): each consumer of the fan-out seam
+        # advances its own cursor, so events are never stolen between
+        # consumers. ``_event_cursors`` backs ``Runtime.events`` (the
+        # public API keeps its consume-once semantics); ``_caps_cursors``
+        # backs the message-rate cap's per-step delta.
+        self._event_cursors: dict[str, int] = {}
+        self._caps_cursors: dict[str, int] = {}
         self._extra_namespace: dict[str, dict] = {}
         self._lock = threading.RLock()
         self._id_counter = 0
@@ -353,10 +372,33 @@ class Runtime:
                 return len(self._agents[agent_id].children)
 
         def _pending_messages() -> int:
+            # Drain-race fix: peek (non-destructive) + a per-step delta
+            # cursor. The historical drain counted whatever was pending at
+            # the instant the cap ran — a per-step delta, not a cumulative
+            # total — so the cursor keeps exactly that semantics while the
+            # peek stops the watchdog from consuming the other consumers'
+            # events.
+            peek = getattr(self.event_bus, "peek", None)
+            if peek is None:
+                # A bus without the fan-out seam: the destructive drain is
+                # itself the per-step delta (it clears the topic).
+                try:
+                    return len(self.event_bus.drain(f"events:{agent_id}"))
+                except Exception:  # noqa: BLE001 - counting is best-effort
+                    return 0
             try:
-                return len(self.event_bus.drain(f"events:{agent_id}"))
+                events = peek(f"events:{agent_id}")
             except Exception:  # noqa: BLE001 - counting is best-effort
                 return 0
+            with self._lock:
+                seen = self._caps_cursors.get(agent_id, 0)
+                if len(events) < seen:
+                    # The stream shrank underneath us (a foreign destructive
+                    # drain): count from the start rather than skip events.
+                    seen = 0
+                fresh = max(len(events) - seen, 0)
+                self._caps_cursors[agent_id] = len(events)
+            return fresh
 
         return _caps.caps_exceeded(
             agent_id,
@@ -587,8 +629,31 @@ class Runtime:
             return list(self._delivered.get(agent_id, []))
 
     def events(self, agent_id: str) -> list:
-        """Return the events emitted by *agent_id*, in order."""
-        return list(self.event_bus.drain(f"events:{agent_id}"))
+        """Return the events emitted by *agent_id*, in order.
+
+        Drain-race fix: reads the non-destructive peek and advances this
+        runtime's per-agent cursor, so the call keeps its historical
+        consume-once semantics (a second call returns only events published
+        since the first) without stealing events from the other consumers
+        of the fan-out seam (the caps watchdog, the driver's recent
+        context, the StateWriter poll thread).
+        """
+        topic = f"events:{agent_id}"
+        peek = getattr(self.event_bus, "peek", None)
+        if peek is None:
+            # A bus without the fan-out seam: fall back to the destructive
+            # drain (the pre-fix contract).
+            return list(self.event_bus.drain(topic))
+        events = peek(topic)
+        with self._lock:
+            cursor = self._event_cursors.get(agent_id, 0)
+            if len(events) < cursor:
+                # The stream shrank underneath us (a foreign destructive
+                # drain): re-read from the start rather than skip events.
+                cursor = 0
+            fresh = events[cursor:]
+            self._event_cursors[agent_id] = len(events)
+        return list(fresh)
 
     def completion_log(self) -> CompletionLog:
         """Return the at-most-once settlement registry."""

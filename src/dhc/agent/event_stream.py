@@ -88,6 +88,17 @@ class EventStream:
             self._pending = []
             return pending
 
+    def peek(self) -> list[Event]:
+        """Return the pending events without consuming them (fan-out seam).
+
+        Drain-race fix: consumers of the ``events:<id>`` topics read
+        through this non-destructive peek and keep their own cursor, so no
+        consumer steals another's events. ``drain`` stays destructive (the
+        runtime's poll surface, INFO-051).
+        """
+        with self._lock:
+            return list(self._pending)
+
     def pending_count(self) -> int:
         """Number of emitted events not yet drained."""
         with self._lock:

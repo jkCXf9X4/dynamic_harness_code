@@ -415,9 +415,15 @@ class StateWriter:
 
         Used when the bus exposes only ``publish(topic, event)`` /
         ``drain(topic)`` (the runtime's in-memory default). A daemon thread
-        drains each agent's event topic and forwards to *on_event*.
+        reads each agent's event topic and forwards to *on_event*. The bus
+        peek is non-destructive (the drain-race fix), so this thread keeps
+        its own per-agent cursor and forwards each event exactly once.
         """
         import threading
+
+        # agent_id -> number of events already forwarded (this writer's
+        # watermark over the non-destructive stream).
+        cursors: dict[str, int] = {}
 
         def _poll() -> None:
             while True:
@@ -425,8 +431,24 @@ class StateWriter:
                     agents = getattr(runtime, "_agents", None)
                     if agents is not None:
                         for agent_id in list(agents.keys()):
-                            for event in runtime.event_bus.drain(f"events:{agent_id}"):
-                                on_event(event)
+                            topic = f"events:{agent_id}"
+                            peek = getattr(runtime.event_bus, "peek", None)
+                            if peek is not None:
+                                events = peek(topic)
+                                seen = cursors.get(agent_id, 0)
+                                if len(events) < seen:
+                                    # The stream shrank underneath us (a
+                                    # foreign destructive drain): re-read
+                                    # from the start rather than skip.
+                                    seen = 0
+                                for event in events[seen:]:
+                                    on_event(event)
+                                cursors[agent_id] = len(events)
+                            else:
+                                # A bus without the fan-out seam: the
+                                # destructive drain forwards each event once.
+                                for event in runtime.event_bus.drain(topic):
+                                    on_event(event)
                 except Exception:  # noqa: BLE001 - polling must never crash
                     pass
                 time.sleep(0.05)
