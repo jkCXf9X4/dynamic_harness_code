@@ -82,9 +82,15 @@ containment, ceiling caps, cancellation grace). Evidence:
 - **`_MemoryBus` drain race** — `drain` clears the topic and four consumers
   race on `events:<id>` (caps watchdog, `Runtime.events`,
   `LLMDriver._recent_context`, the StateWriter poll thread); the first drainer
-  starves the rest. **Approved as a sequenced follow-on**: the fix lands next
-  and this record is updated then. It is deliberately *not* part of this pure
-  refactor.
+  starves the rest. **Implemented** (commit `2605b44`): every bus exposes a
+  non-destructive `peek()` alongside the destructive `drain()`
+  (`_MemoryBus`, `EventStream`, `_WiredBus`), and each consumer keeps its own
+  cursor over the non-destructive stream — `Runtime.events` a per-agent
+  cursor (consume-once semantics preserved), the caps watchdog a per-step
+  delta (gate-(f) behavior unchanged), the StateWriter poll thread its own
+  watermark (each event forwarded exactly once). The `completions:<id>`
+  topics stay destructive (INFO-046 at-most-once). Proven by
+  `tests/agent/test_event_fanout.py`.
 - **Stringly-typed event kinds** — `state.py` matches event kinds by string
   literals instead of the `EventKind` enum. **Open** — IMP-002.
 - **Wall-clock bases** — `time.time` and `time.monotonic` are mixed across the
@@ -115,5 +121,5 @@ containment, ceiling caps, cancellation grace). Evidence:
 - The public API (`dhc.cli:main`, the Runtime contract, `build_runtime`,
   `register_default_tools`) is unchanged; D2's four hard gates stay
   pump-owned; the fabrication kit remains the only backward-compat path (D4).
-- The `_MemoryBus` drain race is the next sequenced fix; the three open
-  hazards are tracked as IMP-002/003/004.
+- The `_MemoryBus` drain race is fixed (commit `2605b44`, see the hazards
+  disposition above); the three open hazards are tracked as IMP-002/003/004.
