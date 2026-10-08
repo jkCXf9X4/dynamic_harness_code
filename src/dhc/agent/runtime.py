@@ -332,14 +332,16 @@ class Runtime:
         :func:`dhc.agent.loop.install_runner`; thin wrapper (re-export seam)."""
         return _loop.install_runner(engine, agent_id, kit, source)
 
-    def _service_await(self, agent_id: str, engine: Any, handle: Any) -> bool:
+    def _service_await(self, agent_id: str, engine: Any, handle: Any) -> float:
         """Park the runner until *handle*'s agent settles. Moved to
-        :func:`dhc.agent.loop.service_await`; thin wrapper (re-export seam)."""
+        :func:`dhc.agent.loop.service_await`; thin wrapper (re-export seam).
+        Returns the parked seconds (credited against the wall clock, 0008)."""
         return _loop.service_await(self, agent_id, engine, handle)
 
-    def _service_sleep(self, agent_id: str, engine: Any, seconds: float) -> bool:
+    def _service_sleep(self, agent_id: str, engine: Any, seconds: float) -> float:
         """Park the runner for *seconds* (stop-flag aware). Moved to
-        :func:`dhc.agent.loop.service_sleep`; thin wrapper (re-export seam)."""
+        :func:`dhc.agent.loop.service_sleep`; thin wrapper (re-export seam).
+        Returns the parked seconds (credited against the wall clock, 0008)."""
         return _loop.service_sleep(self, agent_id, engine, seconds)
 
     # -- ceiling caps (predicate moved to dhc.agent.caps) --------------------
@@ -358,6 +360,7 @@ class Runtime:
         engine: Any,
         step_count: int,
         started_ts: float,
+        parked_seconds: float = 0.0,
     ) -> Optional[str]:
         """Return the name of the first ceiling cap exceeded, else None.
 
@@ -408,6 +411,7 @@ class Runtime:
             settings=self.settings,
             child_count=_child_count,
             pending_messages=_pending_messages,
+            parked_seconds=parked_seconds,
         )
 
     # -- namespace -----------------------------------------------------------
