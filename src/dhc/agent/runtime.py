@@ -1,8 +1,15 @@
 """The runtime orchestrator.
 
-Owns the agent registry, thread-per-agent placement (INFO-038), the worker
-loop (driver -> turn -> settle), completion dispatch (at-most-once, INFO-046),
-parent liveness (INFO-014), and cancellation (INFO-034/040).
+Owns the agent registry, thread-per-agent placement (INFO-038), completion
+dispatch (at-most-once, INFO-046), parent liveness (INFO-014), and
+cancellation (INFO-034/040). The worker loop (driver -> turn -> settle) and
+the pumped ``__runner`` path live in :mod:`dhc.agent.loop`; the ceiling-caps
+watchdog predicate lives in :mod:`dhc.agent.caps`; the fabrication
+ensure/re-seed helper lives in :mod:`dhc.agent.integrity`. This module keeps
+the runtime state (the 15 dicts/flags + the one RLock), settlement, the
+namespace build, the public supervision API, and thin method wrappers over
+every moved name — the re-export seam — so existing imports (including
+tests importing privates) keep working.
 
 All collaborators (engine, event bus, artifact store, settings) are injected
 via the constructor — duck-typed, never imported from sibling modules at
@@ -19,7 +26,7 @@ import traceback
 from typing import Any, Callable, Optional
 
 from .agent import Agent, AgentHandle, bash
-from ..errors import ChannelError, TurnError, TurnTimeoutError
+from ..errors import ChannelError, TurnError, TurnTimeoutError  # noqa: F401 - re-export
 from ..llm.fabrication import DEFAULT_RUNNER_SOURCE, fabrication_kit
 from ..data.models import (
     TERMINAL_STATES,
@@ -33,17 +40,31 @@ from ..data.models import (
     is_terminal,
 )
 
-#: Default step timeout for the pump when settings provide none (seconds).
-_DEFAULT_STEP_TIMEOUT = 120.0
-#: Caps watchdog defaults (overridable via settings; Step 5 owns full config:
-#: SafetyConfig.max_workspace_bytes / max_children / max_messages_per_step).
-_DEFAULT_TIMEOUT_SECONDS = 7200.0
-_DEFAULT_MAX_ITERATIONS = 400
-_DEFAULT_MAX_CHILDREN = 32
-_DEFAULT_MAX_WORKSPACE_BYTES = 1 << 20  # 1 MiB
-#: Message-rate cap is disabled by default; enforced only when settings
-#: provide ``max_messages_per_step`` (Step 5 owns full config).
-_DEFAULT_MAX_MESSAGES_PER_STEP = None
+# The loop concern (moved verbatim; thin wrappers below re-export it).
+from . import loop as _loop
+from .loop import (  # noqa: F401 - re-export (yield vocab, D3 + moved loop callables)
+    Await,
+    Poll,
+    Sleep,
+    install_runner,
+    legacy_loop,
+    pump_agent,
+    pump_loop,
+    service_await,
+    service_sleep,
+    step_timeout,
+    supports_pump,
+)
+from .caps import (  # noqa: F401 - re-export (caps defaults moved with the watchdog)
+    _DEFAULT_MAX_CHILDREN,
+    _DEFAULT_MAX_ITERATIONS,
+    _DEFAULT_MAX_MESSAGES_PER_STEP,
+    _DEFAULT_TIMEOUT_SECONDS,
+    _DEFAULT_MAX_WORKSPACE_BYTES,
+)
+from .loop import _DEFAULT_STEP_TIMEOUT  # noqa: F401 - re-export
+from . import caps as _caps
+from . import integrity as _integrity
 
 
 # --------------------------------------------------------------------------- #
@@ -107,52 +128,6 @@ class _MemoryStore:
     def get(self, artifact_id: str) -> Optional[Artifact]:
         with self._lock:
             return self._artifacts.get(artifact_id)
-
-
-# --------------------------------------------------------------------------- #
-# Yield vocabulary (IMP-001 Step 4, D3: yield-async split)
-# --------------------------------------------------------------------------- #
-
-
-class Await:
-    """Yield request: park the parent's runner until *handle*'s agent settles.
-
-    The parent's runner is NOT advanced while parked (D3): the parent's step
-    budget is not consumed. *handle* is an ``AgentHandle`` (or anything with
-    ``.id``, ``.poll() -> AgentStatus`` and ``.await_() -> Completion``).
-    """
-
-    __slots__ = ("handle",)
-
-    def __init__(self, handle: Any) -> None:
-        self.handle = handle
-
-
-class Poll:
-    """Yield request: return *handle*'s current ``AgentStatus`` without blocking.
-
-    The pump delivers the status back into the generator under the well-known
-    name ``yield_result`` (workspace) and ``state["yield_result"]`` (the
-    runner's ctx slot) before the runner is advanced again.
-    """
-
-    __slots__ = ("handle",)
-
-    def __init__(self, handle: Any) -> None:
-        self.handle = handle
-
-
-class Sleep:
-    """Yield request: park the parent's runner for *seconds* (stop-flag aware).
-
-    The parent's runner is NOT advanced while parked (D3): the parent's step
-    budget is not consumed.
-    """
-
-    __slots__ = ("seconds",)
-
-    def __init__(self, seconds: float) -> None:
-        self.seconds = seconds
 
 
 # --------------------------------------------------------------------------- #
@@ -301,380 +276,31 @@ class Runtime:
             thread.start()
         return self._handles[agent_id]
 
-    # -- worker loop ---------------------------------------------------------
+    # -- worker loop (moved to dhc.agent.loop; thin wrappers) -----------------
 
     def _supports_pump(self) -> bool:
-        """True when the engine can drive a resumable ``__runner`` generator.
-
-        The pumped path needs ``install``/``advance``/``inject``/``kill``
-        (ReplEngine primitives, IMP-001 Step 1). A plain in-memory engine
-        (or a bare ``Runtime()`` with no repl_engine) falls back to the
-        legacy turn loop.
-        """
-        if getattr(self, "repl_engine", None) is not None:
-            return True
-        return hasattr(self.engine, "advance")
+        """True when the engine can drive a resumable ``__runner`` generator."""
+        return _loop.supports_pump(self)
 
     def _step_timeout(self) -> float:
-        """The per-step timeout the pump passes to ``engine.advance``.
-
-        Never None: a synchronous advance would let a runaway step hang the
-        pump thread forever. Falls back to a sensible default when settings
-        provide none.
-        """
-        return self._max_turn_seconds() or _DEFAULT_STEP_TIMEOUT
+        """The per-step timeout the pump passes to ``engine.advance``."""
+        return _loop.step_timeout(self)
 
     def _pump_agent(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
-        """Drive *agent_id* to settlement (IMP-001 Step 3).
-
-        Sets the agent running, then either runs the legacy turn loop (plain
-        in-memory engine — the same default-fabrication semantics for the
-        legacy engine) or the pumped loop (ReplEngine-backed runtime driving
-        the agent-authored ``__runner`` generator one yield-window at a time
-        under the four hard gates + caps watchdog). Any escape settles the
-        agent failed (crash containment).
-        """
-        agent = self._agents[agent_id]
-        agent._status = AgentStatus.running
-        try:
-            if not self._supports_pump():
-                self._legacy_loop(agent_id, driver)
-                return
-            self._pump_loop(agent_id, driver)
-        except Exception as exc:  # noqa: BLE001 - last-resort containment
-            self._settle(agent_id, AgentStatus.failed, reason=f"worker crashed: {exc}")
+        """Drive *agent_id* to settlement (IMP-001 Step 3). Moved to
+        :func:`dhc.agent.loop.pump_agent`; thin wrapper (re-export seam)."""
+        return _loop.pump_agent(self, agent_id, driver)
 
     def _legacy_loop(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
-        """The legacy turn loop (exact old ``_worker_loop`` body).
-
-        Used only when the engine does not support resumable runners (plain
-        ``_MemoryEngine`` / bare ``Runtime()``): decide -> execute -> settle,
-        with the same crash/timeout/cancellation containment as before. This
-        is NOT a second loop for agents on the real runtime — it is the same
-        default-fabrication semantics for the legacy in-memory engine.
-        """
-        agent = self._agents[agent_id]
-        last_result: Optional[Result] = None
-        try:
-            while True:
-                if self._stop_flags[agent_id].is_set():
-                    self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                    return
-                # Completion callbacks run between the parent's own actions,
-                # in completion order (INFO-039/047).
-                self._drain_completions(agent_id)
-                if driver is None:
-                    code = None
-                else:
-                    try:
-                        code = driver(agent)
-                    except Exception as exc:  # noqa: BLE001 - crash containment
-                        self._emit(
-                            agent_id,
-                            EventKind.crash,
-                            payload={"error": f"{type(exc).__name__}: {exc}"},
-                        )
-                        self._settle(agent_id, AgentStatus.failed, reason=f"driver crashed: {exc}")
-                        return
-                if code is None:
-                    # Driver says settle. Parent liveness (INFO-014): a parent
-                    # must NOT settle while it has unsettled children.
-                    if not self._wait_children_settled(agent_id):
-                        return  # cancelled while waiting
-                    self._drain_completions(agent_id)
-                    if self._stop_flags[agent_id].is_set():
-                        self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                        return
-                    if last_result is not None and last_result.ok:
-                        self._settle(agent_id, AgentStatus.completed, summary=str(last_result.value or ""))
-                    else:
-                        reason = last_result.reason if last_result is not None else "no result"
-                        self._settle(agent_id, AgentStatus.failed, reason=reason)
-                    return
-                # One turn: emit, execute, record.
-                self._emit(agent_id, EventKind.turn_started, payload={"code": code})
-                agent._last_result = None
-                namespace = self._build_namespace(agent)
-                try:
-                    self.engine.execute(
-                        agent_id,
-                        code,
-                        namespace,
-                        timeout=self._max_turn_seconds(),
-                    )
-                except TurnTimeoutError as exc:
-                    self._emit(agent_id, EventKind.timeout, payload={"error": str(exc)})
-                    self._settle(agent_id, AgentStatus.timeout, reason=str(exc))
-                    return
-                except Exception as exc:  # noqa: BLE001 - crash containment
-                    self._emit(
-                        agent_id,
-                        EventKind.turn_failed,
-                        payload={"error": f"{type(exc).__name__}: {exc}"},
-                    )
-                    self._settle(agent_id, AgentStatus.failed, reason=f"turn crashed: {exc}")
-                    return
-                last_result = agent._last_result
-                if last_result is not None:
-                    self._emit(
-                        agent_id,
-                        EventKind.turn_completed,
-                        payload={"ok": last_result.ok, "reason": last_result.reason},
-                    )
-                    # Acceptance check: non-empty acceptance + ok result -> settle.
-                    if agent.acceptance and last_result.ok:
-                        self._settle(
-                            agent_id,
-                            AgentStatus.completed,
-                            summary=str(last_result.value or ""),
-                        )
-                        return
-                else:
-                    self._emit(
-                        agent_id,
-                        EventKind.turn_completed,
-                        payload={"ok": True, "reason": ""},
-                    )
-        except Exception as exc:  # noqa: BLE001 - last-resort containment
-            self._settle(agent_id, AgentStatus.failed, reason=f"worker crashed: {exc}")
+        """The legacy turn loop (non-pump engines only). Moved to
+        :func:`dhc.agent.loop.legacy_loop`; thin wrapper (re-export seam)."""
+        return _loop.legacy_loop(self, agent_id, driver)
 
     def _pump_loop(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
-        """The pumped path: drive the agent's ``__runner`` one step at a time.
-
-        Installs the fabrication kit (default ``__runner`` + decide + context)
-        into the engine workspace, then advances the runner one yield-window
-        per iteration under the four hard gates:
-
-        - settlement at-most-once (``_settle`` / CompletionLog),
-        - crash containment (per-step error/timeout classification),
-        - ceiling caps (``_caps_watchdog``),
-        - cancellation grace (stop-flag check between steps).
-
-        A custom spawn-time *driver* is honored by seeding
-        ``state["_driver"]`` BEFORE installing — the decide fabrication reads
-        it, which is the seam that makes ScriptedDriver/MockDriver work
-        through the pump.
-        """
-        engine = getattr(self, "repl_engine", None) or self.engine
-        agent = self._agents[agent_id]
-        kit = fabrication_kit(self, engine, agent)
-        if driver is not None:
-            kit["state"]["_driver"] = driver
-        # The yield vocabulary (D3) is part of the in-code surface: agent
-        # code and agent-authored runners can `yield Await(c1)` etc. The kit
-        # doubles as the runner's ctx. NOTE: the kit must NOT be merged with
-        # _build_namespace here — the wired namespace (wiring.py) injects a
-        # FRESH fabrication kit (fresh state dict, __runner=DEFAULT), which
-        # would clobber the seeded _driver and the kit's state.
-        kit["Await"] = Await
-        kit["Poll"] = Poll
-        kit["Sleep"] = Sleep
-        engine.inject(agent_id, kit)
-        installed_source = self._install_runner(engine, agent_id, kit)
-
-        step_count = 0
-        started_ts = time.time()
-        try:
-            while True:
-                # Cancellation grace (INFO-040): cancellation lands between
-                # steps; the stop flag is the grace point. Kill the runner so
-                # it is never resumed (advance returns "abandoned").
-                if self._stop_flags[agent_id].is_set():
-                    try:
-                        engine.kill(agent_id)
-                    except Exception:  # noqa: BLE001 - kill is best-effort
-                        pass
-                    self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                    return
-                # Completion callbacks run between the parent's own actions,
-                # in completion order (INFO-039/047).
-                self._drain_completions(agent_id)
-                # Caps watchdog: ceiling caps are hard gates (D2).
-                cap = self._caps_watchdog(agent_id, engine, step_count, started_ts)
-                if cap is not None:
-                    self._emit(
-                        agent_id,
-                        EventKind.crash,
-                        payload={"cap": cap, "limit": self._cap_limit(cap)},
-                    )
-                    try:
-                        engine.kill(agent_id)
-                    except Exception:  # noqa: BLE001 - kill is best-effort
-                        pass
-                    self._settle(
-                        agent_id,
-                        AgentStatus.failed,
-                        reason=f"cap exceeded: {cap}",
-                    )
-                    return
-                # IMP-001 Step 5 (D4): ensure the fabrication is intact
-                # between steps. A broken/deleted fabrication (e.g.
-                # ``__runner = 42``) is re-seeded here — before the runner is
-                # advanced — so the agent continues instead of failing. The
-                # re-seed emits a crash event with the reseeded names.
-                try:
-                    kit["ensure_fabrication"]()
-                except Exception:  # noqa: BLE001 - re-seed is best-effort
-                    pass
-                # Custom-runner seam: an agent that replaced the workspace
-                # `__runner` source string gets its own runner compiled from
-                # that source. Re-install only when the source changed AND is
-                # not the default source: the wired namespace re-injects the
-                # default `__runner` on every run_block, so a custom runner
-                # that calls run_block must NOT be replaced by the default
-                # runner (we are between steps here, so the runner is never
-                # parked).
-                source = engine.globals_for(agent_id).get("__runner")
-                if (
-                    isinstance(source, str)
-                    and source != installed_source
-                    and source != DEFAULT_RUNNER_SOURCE
-                ):
-                    installed_source = self._install_runner(engine, agent_id, kit, source)
-                step_count += 1
-                self._emit(agent_id, EventKind.turn_started, payload={"step": step_count})
-                outcome = engine.advance(agent_id, timeout=self._step_timeout())
-                if outcome.kind == "yield":
-                    value = outcome.value
-                    if isinstance(value, Await):
-                        # D3: park the parent's runner until the child
-                        # settles; the parent's step budget is NOT consumed
-                        # while parked.
-                        self._emit(
-                            agent_id,
-                            EventKind.turn_completed,
-                            payload={"ok": True, "step": step_count, "yield": "await"},
-                        )
-                        if not self._service_await(agent_id, engine, value.handle):
-                            try:
-                                engine.kill(agent_id)
-                            except Exception:  # noqa: BLE001 - kill is best-effort
-                                pass
-                            self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                            return
-                        continue
-                    if isinstance(value, Sleep):
-                        self._emit(
-                            agent_id,
-                            EventKind.turn_completed,
-                            payload={"ok": True, "step": step_count, "yield": "sleep"},
-                        )
-                        if not self._service_sleep(agent_id, engine, value.seconds):
-                            try:
-                                engine.kill(agent_id)
-                            except Exception:  # noqa: BLE001 - kill is best-effort
-                                pass
-                            self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                            return
-                        continue
-                    if isinstance(value, Poll):
-                        # Non-blocking: deliver the child's current status
-                        # back INTO the generator. No "send value back"
-                        # primitive exists, so the result is injected under
-                        # the well-known name `yield_result` (workspace) and
-                        # `state["yield_result"]` (the runner's ctx slot).
-                        # The handle may be an AgentHandle or an Agent (spawn
-                        # returns the Agent); both carry `.id`.
-                        status = self.poll(getattr(value.handle, "id", value.handle))
-                        kit["state"]["yield_result"] = status
-                        engine.inject(agent_id, {"yield_result": status})
-                        self._emit(
-                            agent_id,
-                            EventKind.turn_completed,
-                            payload={"ok": True, "step": step_count, "yield": "poll"},
-                        )
-                        continue
-                    self._emit(
-                        agent_id,
-                        EventKind.turn_completed,
-                        payload={"ok": True, "step": step_count},
-                    )
-                    continue
-                if outcome.kind == "finished":
-                    # The runner returned (settle() was called inside, or
-                    # StopIteration). Settle by the last result if not already
-                    # terminal (at-most-once).
-                    if not is_terminal(agent._status):
-                        last_result = agent._last_result
-                        if last_result is not None and last_result.ok:
-                            self._settle(
-                                agent_id,
-                                AgentStatus.completed,
-                                summary=str(last_result.value or ""),
-                            )
-                        else:
-                            reason = last_result.reason if last_result is not None else "no result"
-                            self._settle(agent_id, AgentStatus.failed, reason=reason)
-                    return
-                if outcome.kind == "timeout":
-                    # The engine already rolled back the workspace and
-                    # abandoned the runner (never resumed). Runaway contained.
-                    if self._stop_flags[agent_id].is_set():
-                        # Cancelled while mid-step: the step timeout bounded
-                        # it; the engine rolled back + abandoned. Settle
-                        # cancelled (cancellation grace, INFO-040).
-                        try:
-                            engine.kill(agent_id)
-                        except Exception:  # noqa: BLE001 - kill is best-effort
-                            pass
-                        self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                        return
-                    self._emit(
-                        agent_id,
-                        EventKind.timeout,
-                        payload={"error": outcome.reason or "step timed out"},
-                    )
-                    self._settle(
-                        agent_id,
-                        AgentStatus.timeout,
-                        reason=outcome.reason or "step timed out",
-                    )
-                    return
-                if outcome.kind == "error":
-                    if self._stop_flags[agent_id].is_set():
-                        # Cancelled while mid-step: the step raised; settle
-                        # cancelled (cancellation grace, INFO-040).
-                        try:
-                            engine.kill(agent_id)
-                        except Exception:  # noqa: BLE001 - kill is best-effort
-                            pass
-                        self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                        return
-                    self._emit(
-                        agent_id,
-                        EventKind.turn_failed,
-                        payload={"error": outcome.reason or "step failed"},
-                    )
-                    self._settle(
-                        agent_id,
-                        AgentStatus.failed,
-                        reason=outcome.reason or "step failed",
-                    )
-                    return
-                # suspended / abandoned / not_installed: the runner is not
-                # advancing. If cancelled, settle cancelled; otherwise try to
-                # re-seed the fabrication and continue, or settle failed.
-                if self._stop_flags[agent_id].is_set():
-                    try:
-                        engine.kill(agent_id)
-                    except Exception:  # noqa: BLE001 - kill is best-effort
-                        pass
-                    self._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
-                    return
-                try:
-                    reseeded = kit["ensure_fabrication"]()
-                except Exception:  # noqa: BLE001 - re-seed is best-effort
-                    reseeded = []
-                if reseeded:
-                    continue
-                self._settle(
-                    agent_id,
-                    AgentStatus.failed,
-                    reason=f"runner unavailable: {outcome.kind}",
-                )
-                return
-        except Exception as exc:  # noqa: BLE001 - last-resort containment
-            self._settle(agent_id, AgentStatus.failed, reason=f"worker crashed: {exc}")
+        """The ONE loop for the real runtime: drive the agent's ``__runner``
+        one yield-window per step under the four hard gates. Moved to
+        :func:`dhc.agent.loop.pump_loop`; thin wrapper (re-export seam)."""
+        return _loop.pump_loop(self, agent_id, driver)
 
     def _install_runner(
         self,
@@ -683,104 +309,29 @@ class Runtime:
         kit: dict,
         source: Optional[str] = None,
     ) -> str:
-        """Compile and install the agent's ``__runner`` generator.
-
-        The source defaults to the kit's ``__runner`` (the default runner
-        source injected by the fabrication kit). The runner is compiled with
-        the workspace surface + kit as globals — so agent-authored runners can
-        reference in-code names (``spawn``, ``complete``, ``Await``, ...)
-        directly — and receives the kit as its ``ctx`` argument. Returns the
-        installed source (the re-install seam compares it with the workspace
-        ``__runner`` string).
-        """
-        if source is None:
-            source = kit.get("__runner")
-        if not isinstance(source, str):
-            source = DEFAULT_RUNNER_SOURCE
-        ns: dict = {"__builtins__": __builtins__}
-        ns.update(engine.globals_for(agent_id))
-        ns.update(kit)
-        exec(compile(source, f"<runner:{agent_id}>", "exec"), ns)
-        engine.install(agent_id, ns["__runner__"](kit))
-        return source
+        """Compile and install the agent's ``__runner`` generator. Moved to
+        :func:`dhc.agent.loop.install_runner`; thin wrapper (re-export seam)."""
+        return _loop.install_runner(engine, agent_id, kit, source)
 
     def _service_await(self, agent_id: str, engine: Any, handle: Any) -> bool:
-        """Park *agent_id*'s runner until *handle*'s agent settles, then resume.
-
-        The parent's runner is NOT advanced while parked (D3): step_count does
-        not increment and the step budget is not consumed. Completion wakeups
-        ride the existing CompletionDispatcher (INFO-047): the parent's
-        pending completions are drained each poll so the parent's stream keeps
-        moving while it waits.
-
-        Returns True when the runner was resumed; False when the parent was
-        cancelled while parked (the caller must kill the runner and settle).
-        """
-        engine.suspend(agent_id)
-        # The handle may be an AgentHandle or an Agent (spawn returns the
-        # Agent); both carry `.id`. Poll via the runtime so either works.
-        child_id = getattr(handle, "id", handle)
-        try:
-            while True:
-                if self._stop_flags[agent_id].is_set():
-                    return False
-                self._drain_completions(agent_id)
-                try:
-                    status = self.poll(child_id)
-                except KeyError:
-                    # The awaited agent vanished (should not happen); treat it
-                    # as settled so the parent does not hang.
-                    return True
-                if is_terminal(status):
-                    return True
-                time.sleep(0.01)
-        finally:
-            engine.resume(agent_id)
+        """Park the runner until *handle*'s agent settles. Moved to
+        :func:`dhc.agent.loop.service_await`; thin wrapper (re-export seam)."""
+        return _loop.service_await(self, agent_id, engine, handle)
 
     def _service_sleep(self, agent_id: str, engine: Any, seconds: float) -> bool:
-        """Park *agent_id*'s runner for *seconds* (honoring the stop flag).
+        """Park the runner for *seconds* (stop-flag aware). Moved to
+        :func:`dhc.agent.loop.service_sleep`; thin wrapper (re-export seam)."""
+        return _loop.service_sleep(self, agent_id, engine, seconds)
 
-        The parent's runner is NOT advanced while parked (D3): step_count does
-        not increment and the step budget is not consumed.
-
-        Returns True when the runner was resumed; False when the parent was
-        cancelled while parked (the caller must kill the runner and settle).
-        """
-        engine.suspend(agent_id)
-        try:
-            deadline = time.monotonic() + seconds
-            while True:
-                if self._stop_flags[agent_id].is_set():
-                    return False
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return True
-                time.sleep(min(0.01, remaining))
-        finally:
-            engine.resume(agent_id)
+    # -- ceiling caps (predicate moved to dhc.agent.caps) --------------------
 
     def _cap(self, name: str, default: Any) -> Any:
         """Read a cap from settings None-safely (safety config first)."""
-        s = self.settings
-        if s is None:
-            return default
-        safety = getattr(getattr(s, "config", None), "safety", None)
-        if safety is not None:
-            value = getattr(safety, name, None)
-            if value is not None:
-                return value
-        return getattr(s, name, default)
+        return _caps.read_cap(self.settings, name, default)
 
     def _cap_limit(self, cap: str) -> Any:
         """The configured limit for a cap name (for the crash event payload)."""
-        return {
-            "wall_clock": self._cap("timeout_seconds", _DEFAULT_TIMEOUT_SECONDS),
-            "iterations": self._cap("max_iterations", _DEFAULT_MAX_ITERATIONS),
-            "children": self._cap("max_children", None)
-            or self._cap("max_agents", _DEFAULT_MAX_CHILDREN),
-            "workspace_bytes": self._cap("max_workspace_bytes", _DEFAULT_MAX_WORKSPACE_BYTES),
-            "messages_per_step": self._cap("max_messages_per_step", _DEFAULT_MAX_MESSAGES_PER_STEP),
-        }.get(cap)
+        return _caps.cap_limit(cap, self.settings)
 
     def _caps_watchdog(
         self,
@@ -791,48 +342,33 @@ class Runtime:
     ) -> Optional[str]:
         """Return the name of the first ceiling cap exceeded, else None.
 
-        Reads caps from settings None-safely (safety.timeout_seconds /
-        max_iterations / max_agents / max_workspace_bytes / max_children /
-        max_messages_per_step; Step 5 owns full config). Tests force caps via
-        a tiny settings object.
+        Moved to :func:`dhc.agent.caps.caps_exceeded`; this wrapper supplies
+        the runtime-state reads as lazy thunks (the lock-guarded child count
+        and the event-bus drain — the drain runs only when the message-rate
+        cap is enabled, exactly as before).
         """
-        # Wall clock (safety.timeout_seconds).
-        timeout_seconds = self._cap("timeout_seconds", _DEFAULT_TIMEOUT_SECONDS)
-        if timeout_seconds is not None and time.time() - started_ts > timeout_seconds:
-            return "wall_clock"
-        # Step count (safety.max_iterations).
-        max_iterations = self._cap("max_iterations", _DEFAULT_MAX_ITERATIONS)
-        if max_iterations is not None and step_count >= max_iterations:
-            return "iterations"
-        # Child count (safety.max_children, falling back to safety.max_agents).
-        max_children = self._cap("max_children", None)
-        if max_children is None:
-            max_children = self._cap("max_agents", _DEFAULT_MAX_CHILDREN)
-        if max_children is not None:
+
+        def _child_count() -> int:
             with self._lock:
-                child_count = len(self._agents[agent_id].children)
-            if child_count >= max_children:
-                return "children"
-        # Workspace bytes (module constant unless settings provide one).
-        max_workspace_bytes = self._cap("max_workspace_bytes", _DEFAULT_MAX_WORKSPACE_BYTES)
-        if max_workspace_bytes is not None:
+                return len(self._agents[agent_id].children)
+
+        def _pending_messages() -> int:
             try:
-                ws = engine.globals_for(agent_id)
-                size = sum(len(str(v)) for v in ws.values())
-            except Exception:  # noqa: BLE001 - sizing is best-effort
-                size = 0
-            if size > max_workspace_bytes:
-                return "workspace_bytes"
-        # Message rate (module constant unless settings provide one).
-        max_messages = self._cap("max_messages_per_step", _DEFAULT_MAX_MESSAGES_PER_STEP)
-        if max_messages is not None:
-            try:
-                pending = len(self.event_bus.drain(f"events:{agent_id}"))
+                return len(self.event_bus.drain(f"events:{agent_id}"))
             except Exception:  # noqa: BLE001 - counting is best-effort
-                pending = 0
-            if pending > max_messages:
-                return "messages_per_step"
-        return None
+                return 0
+
+        return _caps.caps_exceeded(
+            agent_id,
+            engine,
+            step_count,
+            started_ts,
+            settings=self.settings,
+            child_count=_child_count,
+            pending_messages=_pending_messages,
+        )
+
+    # -- namespace -----------------------------------------------------------
 
     def _build_namespace(self, agent: Agent) -> dict:
         """Build the in-code namespace for one turn from the Agent.

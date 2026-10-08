@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from ..agent.context import make_observe as _context_make_observe
 from .driver import driver_from_settings
 from ..data.models import AgentStatus, EventKind
 
@@ -161,17 +162,17 @@ def make_run_block(
 def make_observe(
     runtime: Any, agent_id: str, state: dict
 ) -> Callable[[], list]:
-    """Consume happenings: completion callbacks + the event-stream digest."""
+    """Consume happenings: completion callbacks + the event-stream digest.
 
-    def observe() -> list:
-        runtime._drain_completions(agent_id)
-        events = runtime.events(agent_id)
-        digest = state.setdefault("digests", {}).setdefault("events", [])
-        digest.extend(events)
-        del digest[:-50]
-        return events
-
-    return observe
+    Thin delegate to :mod:`dhc.agent.context` (the context-trigger seam);
+    identical semantics: drain, extend the workspace digest, trim to the
+    last 50 entries.
+    """
+    return _context_make_observe(
+        lambda: runtime._drain_completions(agent_id),
+        lambda: runtime.events(agent_id),
+        state,
+    )
 
 
 def make_settle(runtime: Any, agent_id: str) -> Callable[[], None]:
@@ -397,7 +398,10 @@ def fabrication_kit(runtime: Any, engine: Any, agent: Any) -> dict:
 
     driver = state.get("_driver")
     if driver is None:
-        driver = driver_from_settings(mock=getattr(runtime, "mock", False))
+        driver = driver_from_settings(
+            mock=getattr(runtime, "mock", False),
+            rot_detector=getattr(runtime, "rot_detector", None),
+        )
         state["_driver"] = driver
     decide = make_decide(driver, agent, state)
     run_block = make_run_block(

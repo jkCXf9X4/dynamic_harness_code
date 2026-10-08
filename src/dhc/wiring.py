@@ -43,6 +43,7 @@ from .ui.communication import (
 )
 from .data.config import get_settings
 from .llm.driver import MockDriver, driver_from_settings
+from .llm.llm import ContextRotDetector
 from .errors import ChannelError, TurnError, TurnTimeoutError
 from .agent.event_stream import CompletionDispatcher, EventBus
 from .llm.fabrication import fabrication_kit
@@ -411,6 +412,10 @@ def build_runtime(
     runtime.artifact_store_real = store
     runtime.operator = Operator(runtime=runtime, question_channel=questions)
     runtime.mock = mock
+    # INFO-021: activate the dormant context-rot detector — observe-only.
+    # The per-agent fabrication kit forwards it to driver_from_settings so
+    # LLMDriver.__call__'s existing per-block observation actually collects.
+    runtime.rot_detector = ContextRotDetector()
 
     _extend_namespace(
         runtime, bus, messenger, rooms, escalations, questions, store_adapter

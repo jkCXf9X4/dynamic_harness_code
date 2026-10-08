@@ -194,7 +194,11 @@ class MockDriver:
         return cls([code])
 
 
-def driver_from_settings(settings: Any = None, mock: bool = False) -> Any:
+def driver_from_settings(
+    settings: Any = None,
+    mock: bool = False,
+    rot_detector: Optional[Any] = None,
+) -> Any:
     """Factory: pick the driver for *settings*.
 
     ``mock=True`` or no API key -> a :class:`MockDriver` with the default
@@ -204,6 +208,10 @@ def driver_from_settings(settings: Any = None, mock: bool = False) -> Any:
     build time). The key is resolved by :func:`~dhc.config.merge_api_key`
     (``OPENROUTER_API_KEY`` → ``OPENAI_API_KEY``); model / base_url / timeout
     come from ``settings.provider``.
+
+    ``rot_detector`` — optional :class:`~dhc.llm.ContextRotDetector`; when
+    wired, each generated block is scored and a warning is logged on rot
+    (INFO-021). Observe-only: it never prunes.
     """
     if settings is None:
         settings = get_settings()
@@ -217,4 +225,4 @@ def driver_from_settings(settings: Any = None, mock: bool = False) -> Any:
         timeout_seconds=provider_cfg.call_timeout_seconds,
         base_url=provider_cfg.base_url,
     )
-    return LLMDriver(client)
+    return LLMDriver(client, rot_detector=rot_detector)
