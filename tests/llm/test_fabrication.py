@@ -247,6 +247,120 @@ def test_ensure_fabrication_noop_when_intact(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# G-03: every FABRICATION_NAMES citizen is guarded (re-seed + crash event)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("name", list(FABRICATION_NAMES))
+def test_ensure_fabrication_reseeds_each_broken_citizen(tmp_path, name):
+    """Breaking (or deleting) each of the 9 kit citizens in the workspace
+    triggers a re-seed from the kit's canonical copy AND a
+    ``fabrication_reseeded`` crash event naming that citizen.
+
+    Covers the 5 previously-unguarded citizens (``ensure_fabrication``,
+    ``checkpoint``, ``rollback``, ``compact``, ``caps``) as well as the 4
+    already-guarded ones, so the guard is proven complete over
+    :data:`FABRICATION_NAMES`.
+    """
+    rt = _wired(tmp_path)
+    try:
+        agent = _register_agent(rt)
+        engine = rt.repl_engine
+        kit = fabrication_kit(rt, engine, agent)
+        # Seed the workspace with the kit so it has a real, intact baseline.
+        engine.inject(agent.id, kit)
+
+        # Break the target citizen: a non-canonical, non-callable value for
+        # the callable citizens; a non-string for the ``__runner`` source
+        # (a custom runner *source string* is valid agent-authored loop code,
+        # so only a non-string breaks the runner).
+        broken = 42
+        engine.inject(agent.id, {name: broken})
+        assert engine.globals_for(agent.id)[name] == broken
+
+        reseeded = kit["ensure_fabrication"]()
+        assert reseeded == [name], f"expected only {name!r} re-seeded, got {reseeded!r}"
+
+        # The citizen is restored to the kit's canonical copy.
+        ws = engine.globals_for(agent.id)
+        if name == "__runner":
+            assert ws[name] == DEFAULT_RUNNER_SOURCE
+        elif name == "context":
+            assert isinstance(ws[name], FabricationContext)
+        else:
+            assert callable(ws[name])
+
+        # A fabrication_reseeded crash event names the citizen.
+        reseed_events = [
+            e for e in rt.events(agent.id)
+            if e.kind == EventKind.crash and "fabrication_reseeded" in e.payload
+        ]
+        assert reseed_events, f"no fabrication_reseeded event for {name!r}"
+        assert reseed_events[0].payload["fabrication_reseeded"] == [name]
+    finally:
+        rt.stop()
+
+
+def test_ensure_fabrication_reseeds_deleted_citizens(tmp_path):
+    """Deleting (setting to None) each of the 9 citizens also triggers a
+    re-seed + crash event — the guard covers both breakage and deletion."""
+    rt = _wired(tmp_path)
+    try:
+        agent = _register_agent(rt)
+        engine = rt.repl_engine
+        kit = fabrication_kit(rt, engine, agent)
+        engine.inject(agent.id, kit)
+        for name in FABRICATION_NAMES:
+            engine.inject(agent.id, {name: None})
+        reseeded = kit["ensure_fabrication"]()
+        assert sorted(reseeded) == sorted(FABRICATION_NAMES)
+        reseed_events = [
+            e for e in rt.events(agent.id)
+            if e.kind == EventKind.crash and "fabrication_reseeded" in e.payload
+        ]
+        assert reseed_events
+        assert sorted(reseed_events[0].payload["fabrication_reseeded"]) == sorted(FABRICATION_NAMES)
+    finally:
+        rt.stop()
+
+
+def test_ensure_fabrication_self_guard_no_recursion(tmp_path):
+    """The self-guard case: a broken workspace ``ensure_fabrication`` is
+    re-seedable. The pump invokes the kit-owned closure (via
+    ``integrity.ensure_fabrication``), never the workspace copy, so re-seeding
+    the workspace ``ensure_fabrication`` needs no recursion and no dependence
+    on the broken copy.
+    """
+    rt = _wired(tmp_path)
+    try:
+        agent = _register_agent(rt)
+        engine = rt.repl_engine
+        kit = fabrication_kit(rt, engine, agent)
+        engine.inject(agent.id, kit)
+        # Break the workspace copy of ensure_fabrication.
+        engine.inject(agent.id, {"ensure_fabrication": 42})
+        assert engine.globals_for(agent.id)["ensure_fabrication"] == 42
+
+        # Drive the guard the way the pump does: through the kit-owned
+        # closure, NOT the (broken) workspace copy.
+        from dhc.agent import integrity
+        integrity.ensure_fabrication(kit)
+
+        # The workspace copy is re-seeded to a callable (the kit's closure).
+        ws_ef = engine.globals_for(agent.id)["ensure_fabrication"]
+        assert callable(ws_ef)
+        # A crash event named the citizen.
+        reseed_events = [
+            e for e in rt.events(agent.id)
+            if e.kind == EventKind.crash and "fabrication_reseeded" in e.payload
+        ]
+        assert reseed_events
+        assert "ensure_fabrication" in reseed_events[0].payload["fabrication_reseeded"]
+    finally:
+        rt.stop()
+
+
+# --------------------------------------------------------------------------- #
 # The fabrication kit is present in the namespace
 # --------------------------------------------------------------------------- #
 

@@ -314,10 +314,16 @@ def make_ensure_fabrication(
 ) -> Callable[[], list]:
     """Re-seed any fabrication the agent broke or deleted (D4).
 
-    Checks the workspace citizens (``__runner``, ``context``, ``decide``,
-    ``run_block``) and re-seeds the broken/missing ones with the defaults,
-    re-installing the engine-side runner when ``__runner`` was broken. Emits
-    a ``fabrication_reseeded`` event when anything was re-seeded.
+    Validates every workspace citizen in :data:`FABRICATION_NAMES` against
+    the kit's canonical copies and re-seeds the broken/missing ones from the
+    kit, re-installing the engine-side runner when ``__runner`` was broken.
+    Emits a ``fabrication_reseeded`` crash event naming the re-seeded
+    citizens when anything was re-seeded.
+
+    The self-guard case: the pump calls this kit-owned closure (via
+    :mod:`dhc.agent.integrity`), never the workspace copy, so a broken
+    workspace ``ensure_fabrication`` is itself re-seedable without recursion
+    or dependence on the broken copy.
     """
 
     def ensure_fabrication() -> list:
@@ -354,6 +360,42 @@ def make_ensure_fabrication(
             kit = kit_builder()
             engine.inject(agent_id, {"run_block": kit["run_block"]})
             reseeded.append("run_block")
+
+        # The 5 previously-unguarded citizens (G-03): validated against the
+        # kit's canonical copies and re-seeded from the kit. The self-guard
+        # case — a broken workspace ``ensure_fabrication`` — is handled here
+        # because the pump invokes THIS kit-owned closure, never the
+        # workspace copy, so re-seeding it needs no recursion and no
+        # dependence on the broken copy.
+        ef = ws.get("ensure_fabrication")
+        if not callable(ef):
+            kit = kit_builder()
+            engine.inject(agent_id, {"ensure_fabrication": kit["ensure_fabrication"]})
+            reseeded.append("ensure_fabrication")
+
+        cp = ws.get("checkpoint")
+        if not callable(cp):
+            kit = kit_builder()
+            engine.inject(agent_id, {"checkpoint": kit["checkpoint"]})
+            reseeded.append("checkpoint")
+
+        rbk = ws.get("rollback")
+        if not callable(rbk):
+            kit = kit_builder()
+            engine.inject(agent_id, {"rollback": kit["rollback"]})
+            reseeded.append("rollback")
+
+        cm = ws.get("compact")
+        if not callable(cm):
+            kit = kit_builder()
+            engine.inject(agent_id, {"compact": kit["compact"]})
+            reseeded.append("compact")
+
+        cv = ws.get("caps")
+        if not callable(cv):
+            kit = kit_builder()
+            engine.inject(agent_id, {"caps": kit["caps"]})
+            reseeded.append("caps")
 
         if reseeded:
             runtime._emit(
