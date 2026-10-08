@@ -33,10 +33,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dhc.driver import MockDriver  # noqa: E402
+from dhc.llm.driver import MockDriver  # noqa: E402
 from dhc.errors import ChannelError  # noqa: E402
-from dhc.fabrication import DEFAULT_RUNNER_SOURCE  # noqa: E402
-from dhc.models import AgentStatus, Completion, EventKind  # noqa: E402
+from dhc.llm.fabrication import DEFAULT_RUNNER_SOURCE  # noqa: E402
+from dhc.data.models import AgentStatus, Completion, EventKind  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -57,7 +57,7 @@ def wait_for(predicate, timeout: float = 10.0) -> bool:
 
 def _pumped_runtime(tmp_path, **settings_kwargs):
     """A fully-wired runtime (ReplEngine + fabrication kit) over tmp_path."""
-    from dhc.config import Settings
+    from dhc.data.config import Settings
     from dhc.wiring import build_runtime
 
     settings = Settings(
@@ -199,7 +199,7 @@ def test_d2c_outer_ceiling_cap(tmp_path):
     """D2c: an outer ceiling cap (max_iterations=1) force-stops the agent
     with 'cap exceeded' before it can finish; the mesh stays alive (a sibling
     spawned after still completes)."""
-    from dhc.config import HarnessConfig, SafetyConfig
+    from dhc.data.config import HarnessConfig, SafetyConfig
 
     rt = _pumped_runtime(
         tmp_path,
@@ -433,7 +433,7 @@ def test_d5b_operational_tripwire_pump_evaluated(tmp_path):
     """D5b: an operational tripwire (max_iterations) is evaluated by the PUMP
     between steps and fires even though the agent's code never checks it. The
     agent is contained; the mesh stays alive."""
-    from dhc.config import HarnessConfig, SafetyConfig
+    from dhc.data.config import HarnessConfig, SafetyConfig
 
     rt = _pumped_runtime(
         tmp_path,

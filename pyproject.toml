@@ -25,9 +25,14 @@ dev = [
 [project.scripts]
 dhc = "dhc.cli:main"
 
+[tool.setuptools.package-dir]
+"" = "src"
+
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["dhc*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["src"]

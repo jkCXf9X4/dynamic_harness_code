@@ -32,7 +32,7 @@ from dhc import (  # noqa: E402
     driver_from_settings,
 )
 from dhc.errors import ChannelError  # noqa: E402
-from dhc.models import Completion  # noqa: E402
+from dhc.data.models import Completion  # noqa: E402
 
 CHILD_OK = (
     "art = publish('child finding', 'child summary', 'child report body')\n"

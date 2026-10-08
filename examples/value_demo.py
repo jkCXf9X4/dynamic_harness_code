@@ -45,7 +45,7 @@ from dhc import (  # noqa: E402
     build_runtime,
     driver_from_settings,
 )
-from dhc.models import Completion, Result  # noqa: E402
+from dhc.data.models import Completion, Result  # noqa: E402
 
 #: The report destination (mission requirement).
 REPORT_PATH = Path(
