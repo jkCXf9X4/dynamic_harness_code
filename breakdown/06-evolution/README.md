@@ -24,4 +24,6 @@ resulting state is written into the owning layer, or when it is rejected.
 
 ## Open IMPs
 
-- **IMP-001** Agent-owned executor — the REPL as the main loop · open · awaiting decision records and adoption
+- **IMP-002** Stringly-typed event kinds in the state snapshot · open · selected, awaiting a decision record
+- **IMP-003** Mixed wall-clock bases across caps, step start, and sleep deadline · open · selected, awaiting a decision record
+- **IMP-004** Inert token and cost fields on the agent state view-model · open · selected, awaiting a decision record
