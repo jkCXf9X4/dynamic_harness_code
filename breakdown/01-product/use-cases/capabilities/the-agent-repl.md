@@ -2,7 +2,7 @@
 id: INFO-050
 type: info
 title: The agent REPL
-summary: Every agent works in a persistent REPL of its own — a private computational workspace whose state survives across actions, that all of the agent's code executes in and never concurrently, and that nothing crosses except explicit context in and explicit results out
+summary: Every agent works in a persistent REPL of its own — a private computational workspace whose state survives across actions, that all of the agent's code executes in and never concurrently, that hosts the turn engine as workspace code (the `__runner` generator, default shipped as a fabrication), and that nothing crosses except explicit context in and explicit results out
 date: 2026-10-06
 status: current
 ---
@@ -10,6 +10,8 @@ status: current
 # The agent REPL
 
 - The REPL is the agent's persistent computational workspace: variables, functions, imports, and loaded tools survive from one action to the next (`INFO-002`).
+- The turn engine — the agent's main loop — is workspace code: the `__runner` generator lives in the agent's own workspace globals, authored as workspace code so the agent can view, edit, and replace it like any other variable it owns (`INFO-037`).
+- The default `__runner` ships as a fabrication: `ensure_fabrication` re-seeds the fabrication kit (default `__runner`, `decide`, context, channels, checkpoint helpers, caps) if the agent breaks or deletes it, so the committed turn loop is the default, not a second execution path (`INFO-037`).
 - Expensive intermediates stay live — embeddings, dataframes, and compiled helpers are computed once and reused instead of recomputed per action.
 - Agent-generated knowledge accumulates in the workspace: notes, helpers, and partial results the agent builds up stay addressable by later actions.
 - Agent-developed tools live in the agent's REPL, not in harness-provided infrastructure — a capability the agent adds persists with the agent it belongs to (`INFO-007`).
@@ -30,4 +32,5 @@ status: current
 - The agent-developed-tools extension contract the workspace carries — `INFO-007`.
 - Artifact hand-off between siblings, which routes published artifacts without shared state — `INFO-012`.
 - The completion-callback contract that runs inside it — `INFO-033`.
+- The turn engine the workspace hosts — the kernel made real — `INFO-037`.
 - The event stream the REPL's pull primitives never touch — `INFO-051`.
