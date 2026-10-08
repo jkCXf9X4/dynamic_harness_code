@@ -202,6 +202,12 @@ class Runtime:
         # backs the message-rate cap's per-step delta.
         self._event_cursors: dict[str, int] = {}
         self._caps_cursors: dict[str, int] = {}
+        # Per-agent read cursor for the agent-facing ``events`` tool (G-04):
+        # the agent's own consume-once view over the same non-destructive
+        # ``events:<id>`` peek. Kept separate from ``_event_cursors`` (the
+        # default runner's observe) so the agent can consume on its own
+        # schedule without stealing from the default loop's digest.
+        self._tool_event_cursors: dict[str, int] = {}
         self._extra_namespace: dict[str, dict] = {}
         self._lock = threading.RLock()
         self._id_counter = 0
@@ -653,6 +659,37 @@ class Runtime:
                 cursor = 0
             fresh = events[cursor:]
             self._event_cursors[agent_id] = len(events)
+        return list(fresh)
+
+    def tool_events(self, agent_id: str) -> list:
+        """The agent-facing settled-event stream (G-04), consume-once.
+
+        The same non-destructive ``events:<id>`` peek as :meth:`events`, but
+        with the *tool's own* per-agent cursor (``_tool_event_cursors``).
+        This is the surface the ``events`` workspace tool wraps: the agent
+        reads its own settled events on its own schedule (its choice, per
+        INFO-053) without rewriting the runner, and without stealing events
+        from the default runner's ``observe`` (which keeps ``_event_cursors``)
+        or from the caps watchdog (``_caps_cursors``). The discipline
+        guarantees (FIFO, at-most-once, persist-before-execute) remain
+        runtime-owned: this only advances a read cursor over the already
+        persisted, ordered stream.
+        """
+        topic = f"events:{agent_id}"
+        peek = getattr(self.event_bus, "peek", None)
+        if peek is None:
+            # A bus without the fan-out seam: fall back to the destructive
+            # drain (the pre-fix contract), same as :meth:`events`.
+            return list(self.event_bus.drain(topic))
+        events = peek(topic)
+        with self._lock:
+            cursor = self._tool_event_cursors.get(agent_id, 0)
+            if len(events) < cursor:
+                # The stream shrank underneath us (a foreign destructive
+                # drain): re-read from the start rather than skip events.
+                cursor = 0
+            fresh = events[cursor:]
+            self._tool_event_cursors[agent_id] = len(events)
         return list(fresh)
 
     def completion_log(self) -> CompletionLog:
