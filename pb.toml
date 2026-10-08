@@ -17,7 +17,6 @@ exempt = ["give-agents-an-in-code-capability-surface.verbs.md", "commit-to-a-min
 
 [ids]
 # Planned handles cited by leaves before their own leaf/record files land.
-# INFO-029 is the in-code capability-surface candidate and INFO-037 is the
-# deliberately-uncommitted kernel/execution-core contract this IMP proposes to
-# make real. (INFO-049 formerly lived here but now has a real leaf.)
-reserved_ids = ["INFO-029", "INFO-037"]
+# INFO-029 is the in-code capability-surface candidate. (INFO-037 and INFO-049
+# formerly lived here but now have real leaves.)
+reserved_ids = ["INFO-029"]
