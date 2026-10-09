@@ -275,6 +275,13 @@ def pump_loop(
 
     step_count = 0
     started_ts = time.time()
+    # Cumulative seconds this agent spent parked on `yield Await` /
+    # `yield Sleep` (decision 0008): parked time is credited against the
+    # wall-clock ceiling — waiting on others consumes no agent budget
+    # (INFO-053). Runaway containment is unaffected: the step timeout and
+    # the iterations cap still bind, and cancellation still terminates a
+    # parked agent.
+    parked_seconds = 0.0
     try:
         while True:
             # Cancellation grace (INFO-040): cancellation lands between
@@ -290,8 +297,11 @@ def pump_loop(
             # Completion callbacks run between the parent's own actions,
             # in completion order (INFO-039/047).
             runtime._drain_completions(agent_id)
-            # Caps watchdog: ceiling caps are hard gates (D2).
-            cap = runtime._caps_watchdog(agent_id, engine, step_count, started_ts)
+            # Caps watchdog: ceiling caps are hard gates (D2). Parked time
+            # is credited against the wall clock (0008).
+            cap = runtime._caps_watchdog(
+                agent_id, engine, step_count, started_ts, parked_seconds=parked_seconds
+            )
             if cap is not None:
                 runtime._emit(
                     agent_id,
@@ -343,7 +353,10 @@ def pump_loop(
                         EventKind.turn_completed,
                         payload={"ok": True, "step": step_count, "yield": "await"},
                     )
-                    if not runtime._service_await(agent_id, engine, value.handle):
+                    parked_seconds += runtime._service_await(
+                        agent_id, engine, value.handle
+                    )
+                    if runtime._stop_flags[agent_id].is_set():
                         try:
                             engine.kill(agent_id)
                         except Exception:  # noqa: BLE001 - kill is best-effort
@@ -357,7 +370,10 @@ def pump_loop(
                         EventKind.turn_completed,
                         payload={"ok": True, "step": step_count, "yield": "sleep"},
                     )
-                    if not runtime._service_sleep(agent_id, engine, value.seconds):
+                    parked_seconds += runtime._service_sleep(
+                        agent_id, engine, value.seconds
+                    )
+                    if runtime._stop_flags[agent_id].is_set():
                         try:
                             engine.kill(agent_id)
                         except Exception:  # noqa: BLE001 - kill is best-effort
@@ -505,7 +521,7 @@ def install_runner(
     return source
 
 
-def service_await(runtime: Any, agent_id: str, engine: Any, handle: Any) -> bool:
+def service_await(runtime: Any, agent_id: str, engine: Any, handle: Any) -> float:
     """Park *agent_id*'s runner until *handle*'s agent settles, then resume.
 
     The parent's runner is NOT advanced while parked (D3): step_count does
@@ -514,49 +530,54 @@ def service_await(runtime: Any, agent_id: str, engine: Any, handle: Any) -> bool
     pending completions are drained each poll so the parent's stream keeps
     moving while it waits.
 
-    Returns True when the runner was resumed; False when the parent was
-    cancelled while parked (the caller must kill the runner and settle).
+    Returns the number of seconds spent parked (>= 0). The caller credits
+    that time against the wall-clock ceiling (decision 0008) and checks the
+    stop flag itself: a False return would lose the parked duration on the
+    cancelled path, and the caller already handles cancellation uniformly.
     """
     engine.suspend(agent_id)
     # The handle may be an AgentHandle or an Agent (spawn returns the
     # Agent); both carry `.id`. Poll via the runtime so either works.
     child_id = getattr(handle, "id", handle)
+    parked_from = time.monotonic()
     try:
         while True:
             if runtime._stop_flags[agent_id].is_set():
-                return False
+                return time.monotonic() - parked_from
             runtime._drain_completions(agent_id)
             try:
                 status = runtime.poll(child_id)
             except KeyError:
                 # The awaited agent vanished (should not happen); treat it
                 # as settled so the parent does not hang.
-                return True
+                return time.monotonic() - parked_from
             if is_terminal(status):
-                return True
+                return time.monotonic() - parked_from
             time.sleep(0.01)
     finally:
         engine.resume(agent_id)
 
 
-def service_sleep(runtime: Any, agent_id: str, engine: Any, seconds: float) -> bool:
+def service_sleep(runtime: Any, agent_id: str, engine: Any, seconds: float) -> float:
     """Park *agent_id*'s runner for *seconds* (honoring the stop flag).
 
     The parent's runner is NOT advanced while parked (D3): step_count does
     not increment and the step budget is not consumed.
 
-    Returns True when the runner was resumed; False when the parent was
-    cancelled while parked (the caller must kill the runner and settle).
+    Returns the number of seconds spent parked (>= 0). The caller credits
+    that time against the wall-clock ceiling (decision 0008) and checks the
+    stop flag itself (see ``service_await``).
     """
     engine.suspend(agent_id)
+    parked_from = time.monotonic()
     try:
         deadline = time.monotonic() + seconds
         while True:
             if runtime._stop_flags[agent_id].is_set():
-                return False
+                return time.monotonic() - parked_from
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return True
+                return time.monotonic() - parked_from
             time.sleep(min(0.01, remaining))
     finally:
         engine.resume(agent_id)

@@ -66,6 +66,7 @@ def caps_exceeded(
     settings: Any,
     child_count: Callable[[], int],
     pending_messages: Callable[[], int],
+    parked_seconds: float = 0.0,
 ) -> Optional[str]:
     """Return the name of the first ceiling cap exceeded, else None.
 
@@ -80,9 +81,15 @@ def caps_exceeded(
     cap is enabled — the drain must NOT run when the message-rate cap is
     disabled, or pending events would be consumed.
     """
-    # Wall clock (safety.timeout_seconds).
+    # Wall clock (safety.timeout_seconds). Parked time is credited
+    # (decision 0008): time spent parked on `yield Await(child)` /
+    # `yield Sleep(t)` does not count against the ceiling — waiting on
+    # others consumes no agent budget (INFO-053). The credit is supplied by
+    # the pump (cumulative parked seconds); it never exceeds elapsed time.
     timeout_seconds = read_cap(settings, "timeout_seconds", _DEFAULT_TIMEOUT_SECONDS)
-    if timeout_seconds is not None and time.time() - started_ts > timeout_seconds:
+    if timeout_seconds is not None and (
+        time.time() - started_ts - max(parked_seconds, 0.0) > timeout_seconds
+    ):
         return "wall_clock"
     # Step count (safety.max_iterations).
     max_iterations = read_cap(settings, "max_iterations", _DEFAULT_MAX_ITERATIONS)
