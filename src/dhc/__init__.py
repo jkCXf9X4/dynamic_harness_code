@@ -18,22 +18,25 @@ Layout (src layout, REV 3 — decision 0016: the framework/composition split
 is the folder hierarchy itself):
 
     framework/  THE FRAMEWORK — the control loop and its guarantees:
-                runtime, loop, agent surface, per-agent REPL, event
+                runtime, pump, agent surface, per-agent REPL, event
                 stream/bus/completion dispatcher, context triggers, rot
                 policy, caps watchdog, integrity — plus the directed-message
-                primitive (``send``, 0015). Ships ZERO tools: nothing that
-                gets installed into an agent REPL namespace lives here.
-                Depends only on data/ and errors/.
+                primitive (``send``, 0015). The framework owns the PUMP and
+                the runner contract, not the loop's content (0017). Ships
+                ZERO tools: nothing that gets installed into an agent REPL
+                namespace lives here. Depends only on data/ and errors/.
     tooling/    THE AGENT'S COMPOSED WORLD — everything installed into agent
-                REPL namespaces beyond the core actions: the framework
-                tools (list_tools, events), the communication channels and
-                their tools, the artifact store and its tools, and the
-                adapters bridging them onto runtime seams (0014/0015/0016).
+                REPL namespaces beyond the core actions: the default agent
+                (the fabrication kit, 0017), the framework tools
+                (list_tools, events), the communication channels and their
+                tools, the artifact store and its tools, and the adapters
+                bridging them onto runtime seams (0014/0015/0016/0017).
                 One-way dependent on the framework.
     ui/         THE OPERATOR'S SIDE — the operator door, the interactive
                 terminal, the operator's review files (state) and
                 resumability store (checkpoint, 0012).
-    llm/        provider plumbing (llm, driver, prompts, fabrication)
+    llm/        provider plumbing (llm, driver, prompts) — a pure leaf
+                since 0017: the framework never imports it
     data/       shared vocabulary both sides import (models, config, trace)
     benchmark/  unchanged subpackage
     wiring.py   THE COMPOSITION ROOT — the only module that imports both

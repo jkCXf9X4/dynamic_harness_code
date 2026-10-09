@@ -19,10 +19,10 @@ and a task contract before code changes begin (change pipeline).
   `261008_105638_6a18`, §2 coupling point 6) and decision record `0007`
   (agent module separation) list the mix: `time.time` at the caps wall-clock
   check (`src/dhc/framework/caps.py:85`, `time.time() - started_ts >
-  timeout_seconds`), the step start (`src/dhc/framework/loop.py:277`,
+  timeout_seconds`), the step start (`src/dhc/framework/pump.py:277`,
   `started_ts = time.time()`), and the settle timestamp
   (`src/dhc/framework/runtime.py:490`, `agent.settled_ts = time.time()`); while
-  the sleep deadline uses `time.monotonic` (`src/dhc/framework/loop.py:553/557`,
+  the sleep deadline uses `time.monotonic` (`src/dhc/framework/pump.py:553/557`,
   `deadline = time.monotonic() + seconds`).
 - **A wall-clock jump can trip or mask a cap.** `time.time` is the wall
   clock: an NTP step, a DST change, or a manual clock edit moves it
@@ -55,7 +55,7 @@ and a task contract before code changes begin (change pipeline).
 | Module | Change |
 |---|---|
 | `src/dhc/framework/caps.py` | The wall-clock cap reads a `time.monotonic` delta (step start captured on the same base) instead of a `time.time` delta. |
-| `src/dhc/framework/loop.py` | `started_ts` (line 277) captured on `time.monotonic` to match the caps predicate; the sleep deadline (lines 553/557) already on `time.monotonic` stays. |
+| `src/dhc/framework/pump.py` | `started_ts` (line 277) captured on `time.monotonic` to match the caps predicate; the sleep deadline (lines 553/557) already on `time.monotonic` stays. |
 | `src/dhc/framework/runtime.py` | `settled_ts` (line 490) stays a `time.time` wall-clock timestamp (reported, not a cap input) — documented as the one wall-clock use. |
 | `tests/` (caps tests) | A wall-clock-jump test proving the caps predicate is monotonic-based and unaffected by a `time.time` step. |
 

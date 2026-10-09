@@ -4,7 +4,7 @@ Two checkpoint mechanisms coexist, and the split is a deliberate control
 split, not a vision violation:
 
 * **Workspace checkpoints** — ``state["checkpoints"]`` in the fabrication kit
-  (``src/dhc/llm/fabrication.py``). Agent-owned, in-memory, ordinary data the
+  (``src/dhc/tooling/fabrication.py``). Agent-owned, in-memory, ordinary data the
   agent reads and writes. This is the agent's side of the control split, and
   it is what the vision's A3 surface ("context and history as ordinary data")
   promises.
@@ -29,7 +29,7 @@ from pathlib import Path
 
 from dhc.framework.agent import Agent, AgentHandle
 from dhc.ui.checkpoint import AgentCheckpoint, CheckpointStore
-from dhc.llm.fabrication import fabrication_kit
+from dhc.tooling.fabrication import fabrication_kit
 from dhc.ui.terminal import Terminal
 from dhc.wiring import build_runtime
 

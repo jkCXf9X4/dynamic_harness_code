@@ -32,7 +32,7 @@ from dhc.framework.rot import (
 )
 from dhc.data.models import AgentStatus, EventKind
 from dhc.llm.driver import LLMDriver, MockDriver
-from dhc.llm.fabrication import FabricationContext, fabrication_kit
+from dhc.tooling.fabrication import FabricationContext, fabrication_kit
 from dhc.llm.llm import ContextRotDetector, RotReport
 
 

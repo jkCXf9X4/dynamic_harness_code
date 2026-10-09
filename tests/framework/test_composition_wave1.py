@@ -103,7 +103,7 @@ def test_composition_pump_gate_order_all_six(tmp_path):
     composed pipeline, not around it.
     """
     from dhc.llm.driver import MockDriver
-    from dhc.llm.fabrication import FABRICATION_NAMES
+    from dhc.tooling.fabrication import FABRICATION_NAMES
 
     rt = _pumped_runtime(tmp_path)
     try:

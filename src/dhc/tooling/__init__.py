@@ -6,6 +6,11 @@ package is everything an agent gets in its REPL namespace beyond the core
 actions, composed onto the runtime by the composition root
 (``wiring.build_runtime``) and one-way dependent on the framework:
 
+* the default agent — the fabrication kit a workspace is born with
+  (default ``__runner`` + ``decide`` + context + helpers), handed to the
+  runtime via ``Runtime(kit_factory=...)`` —
+  :mod:`dhc.tooling.fabrication` (decision 0017: the framework owns the
+  pump and the runner contract, not the loop's content)
 * the framework-surface tools (``list_tools``, ``events``) —
   :mod:`dhc.tooling.framework_tools`
 * the communication channels and their tools —
@@ -32,6 +37,12 @@ from .channels import (
     RoomManager,
 )
 from .channel_tools import register_channel_tools
+from .fabrication import (
+    DEFAULT_RUNNER_SOURCE,
+    FABRICATION_NAMES,
+    FabricationContext,
+    fabrication_kit,
+)
 from .framework_tools import ToolContext, register_default_tools
 
 __all__ = [
@@ -46,6 +57,10 @@ __all__ = [
     "EscalationChannel",
     "OperatorQuestionChannel",
     "register_channel_tools",
+    "DEFAULT_RUNNER_SOURCE",
+    "FABRICATION_NAMES",
+    "FabricationContext",
+    "fabrication_kit",
     "ToolContext",
     "register_default_tools",
 ]

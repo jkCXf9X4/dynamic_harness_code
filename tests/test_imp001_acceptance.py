@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dhc.llm.driver import MockDriver  # noqa: E402
 from dhc.errors import ChannelError  # noqa: E402
-from dhc.llm.fabrication import DEFAULT_RUNNER_SOURCE  # noqa: E402
+from dhc.tooling.fabrication import DEFAULT_RUNNER_SOURCE  # noqa: E402
 from dhc.data.models import AgentStatus, Completion, EventKind  # noqa: E402
 
 

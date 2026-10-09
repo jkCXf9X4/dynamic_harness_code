@@ -1121,7 +1121,7 @@ def test_ensure_fabrication_reseeds(tmp_path):
     between steps, emits a crash event with the reseeded names, and the agent
     continues."""
     from dhc.llm.driver import MockDriver
-    from dhc.llm.fabrication import DEFAULT_RUNNER_SOURCE
+    from dhc.tooling.fabrication import DEFAULT_RUNNER_SOURCE
 
     rt = _pumped_runtime(tmp_path)
     try:

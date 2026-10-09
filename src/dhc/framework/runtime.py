@@ -3,7 +3,7 @@
 Owns the agent registry, thread-per-agent placement (INFO-038), completion
 dispatch (at-most-once, INFO-046), parent liveness (INFO-014), and
 cancellation (INFO-034/040). The worker loop (driver -> turn -> settle) and
-the pumped ``__runner`` path live in :mod:`dhc.framework.loop`; the ceiling-caps
+the pumped ``__runner`` path live in :mod:`dhc.framework.pump`; the ceiling-caps
 watchdog predicate lives in :mod:`dhc.framework.caps`; the fabrication
 ensure/re-seed helper lives in :mod:`dhc.framework.integrity`. This module keeps
 the runtime state (the 17 dicts/flags + the one RLock), settlement, the
@@ -22,7 +22,12 @@ IS core (decision 0015): :meth:`Runtime.send` is the framework's
 communication primitive — a receiver-addressed ``message_sent`` event on the
 recipient's own stream. Channel policies (rooms, escalation, operator
 questions) are tooling composed over that primitive, never runtime
-collaborators.
+collaborators. The default AGENT is composition too (decision 0017): the
+pump drives whatever loop a workspace holds, and the birth kit — the
+default ``__runner__`` + ``decide`` + context + helpers — is handed in
+via ``kit_factory`` (the composition root passes
+``tooling.fabrication.fabrication_kit``); the framework carries the
+runner contract, not the loop's content.
 """
 
 from __future__ import annotations
@@ -35,7 +40,6 @@ from typing import Any, Callable, Optional
 
 from .agent import Agent, AgentHandle, bash
 from ..errors import ChannelError, TurnError, TurnTimeoutError  # noqa: F401 - re-export
-from ..llm.fabrication import DEFAULT_RUNNER_SOURCE, fabrication_kit
 from ..data.models import (
     TERMINAL_STATES,
     AgentStatus,
@@ -48,8 +52,8 @@ from ..data.models import (
 )
 
 # The loop concern (moved verbatim; thin wrappers below re-export it).
-from . import loop as _loop
-from .loop import (  # noqa: F401 - re-export (yield vocab, D3 + moved loop callables)
+from . import pump as _loop
+from .pump import (  # noqa: F401 - re-export (yield vocab, D3 + moved loop callables)
     Await,
     Poll,
     Sleep,
@@ -69,7 +73,7 @@ from .caps import (  # noqa: F401 - re-export (caps defaults moved with the watc
     _DEFAULT_TIMEOUT_SECONDS,
     _DEFAULT_MAX_WORKSPACE_BYTES,
 )
-from .loop import _DEFAULT_STEP_TIMEOUT  # noqa: F401 - re-export
+from .pump import _DEFAULT_STEP_TIMEOUT  # noqa: F401 - re-export
 from . import caps as _caps
 from . import integrity as _integrity
 
@@ -161,10 +165,18 @@ class Runtime:
         engine: Any = None,
         event_bus: Any = None,
         settings: Any = None,
+        kit_factory: Optional[Callable[..., dict]] = None,
     ) -> None:
         self.engine = engine if engine is not None else _MemoryEngine()
         self.event_bus = event_bus if event_bus is not None else _MemoryBus()
         self.settings = settings
+        # Decision 0017: the birth-kit seam. The pump drives whatever
+        # loop a workspace holds; the DEFAULT agent (the fabrication kit)
+        # is composition — the composition root hands its factory in
+        # here. None means the pumped path cannot birth an agent (a bare
+        # Runtime uses the legacy loop anyway; the pump settles failed
+        # with a clear reason if reached without one).
+        self.kit_factory = kit_factory
 
         self._agents: dict[str, Agent] = {}
         self._handles: dict[str, AgentHandle] = {}
@@ -286,7 +298,7 @@ class Runtime:
             thread.start()
         return self._handles[agent_id]
 
-    # -- worker loop (moved to dhc.framework.loop; thin wrappers) -----------------
+    # -- worker loop (moved to dhc.framework.pump; thin wrappers) -----------------
 
     def _supports_pump(self) -> bool:
         """True when the engine can drive a resumable ``__runner`` generator."""
@@ -298,18 +310,18 @@ class Runtime:
 
     def _pump_agent(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
         """Drive *agent_id* to settlement (IMP-001 Step 3). Moved to
-        :func:`dhc.framework.loop.pump_agent`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.pump.pump_agent`; thin wrapper (re-export seam)."""
         return _loop.pump_agent(self, agent_id, driver)
 
     def _legacy_loop(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
         """The legacy turn loop (non-pump engines only). Moved to
-        :func:`dhc.framework.loop.legacy_loop`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.pump.legacy_loop`; thin wrapper (re-export seam)."""
         return _loop.legacy_loop(self, agent_id, driver)
 
     def _pump_loop(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
         """The ONE loop for the real runtime: drive the agent's ``__runner``
         one yield-window per step under the four hard gates. Moved to
-        :func:`dhc.framework.loop.pump_loop`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.pump.pump_loop`; thin wrapper (re-export seam)."""
         return _loop.pump_loop(self, agent_id, driver)
 
     def _install_runner(
@@ -320,18 +332,18 @@ class Runtime:
         source: Optional[str] = None,
     ) -> str:
         """Compile and install the agent's ``__runner`` generator. Moved to
-        :func:`dhc.framework.loop.install_runner`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.pump.install_runner`; thin wrapper (re-export seam)."""
         return _loop.install_runner(engine, agent_id, kit, source)
 
     def _service_await(self, agent_id: str, engine: Any, handle: Any) -> float:
         """Park the runner until *handle*'s agent settles. Moved to
-        :func:`dhc.framework.loop.service_await`; thin wrapper (re-export seam).
+        :func:`dhc.framework.pump.service_await`; thin wrapper (re-export seam).
         Returns the parked seconds (credited against the wall clock, 0008)."""
         return _loop.service_await(self, agent_id, engine, handle)
 
     def _service_sleep(self, agent_id: str, engine: Any, seconds: float) -> float:
         """Park the runner for *seconds* (stop-flag aware). Moved to
-        :func:`dhc.framework.loop.service_sleep`; thin wrapper (re-export seam).
+        :func:`dhc.framework.pump.service_sleep`; thin wrapper (re-export seam).
         Returns the parked seconds (credited against the wall clock, 0008)."""
         return _loop.service_sleep(self, agent_id, engine, seconds)
 

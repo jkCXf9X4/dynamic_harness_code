@@ -83,9 +83,10 @@ into agent REPLs beyond the core actions, `ui/` is the operator's side, and
 | `framework/repl.py` | per-agent persistent `ReplEngine` (INFO-050) |
 | `framework/event_stream.py` | `EventStream`, `EventBus`, `CompletionDispatcher` (INFO-046/047/048) |
 | `framework/agent.py` | the in-code surface: `Agent`, `AgentHandle`, `bash`, `send` (the directed-message primitive, 0015) |
-| `framework/loop.py` | the worker pump: driver → turn → settle with fabrication integrity |
+| `framework/pump.py` | the pump: drives agent-authored `__runner__` loops under the hard gates (renamed from `loop.py`, 0017) |
 | `llm/llm.py` | `LLMClient`, `MockLLM`, `ContextRotDetector` (INFO-020/021) |
 | `llm/driver.py` | `LLMDriver`, `MockDriver`, `driver_from_settings` — the pluggable brain |
+| `tooling/fabrication.py` | the default agent: the fabrication kit a workspace is born with (default `__runner__`, `decide`, context, helpers), handed in via `Runtime(kit_factory=...)` (0017) |
 | `tooling/framework_tools.py` | the framework-surface tools: `list_tools`, `events` (moved out of the framework, 0016) |
 | `tooling/artifact_store.py` | content-addressed `ArtifactStore`, `BoundaryEventLog` (INFO-049) — composed tooling (0014) |
 | `tooling/artifact_tools.py` | the store's REPL tools: `publish`, `read_artifact`, `archive`, `list_artifacts` |

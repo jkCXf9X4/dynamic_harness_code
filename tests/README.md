@@ -26,10 +26,10 @@ decision 0016 is visible here too: `framework/` tests the control loop,
 | directory | tests |
 |---|---|
 | `framework/` | `test_runtime`, `test_repl`, `test_repl_resumable`, `test_event_stream`, `test_event_fanout`, `test_context`, `test_core_tooling_boundary` (the framework↔tooling↔ui guard), `test_direct_messaging` (the `send` primitive, 0015), `test_rot_policy`, `test_token_cost`, `test_h04_monotonic_timebase`, `test_h07_legacy_loop`, `test_g05_parked_time`, `test_composition_wave1` |
-| `llm/` | `test_llm`, `test_fabrication`, `test_prompts`, `test_prompt_assembly` |
+| `llm/` | `test_llm`, `test_prompts`, `test_prompt_assembly` |
 | `ui/` | `test_terminal`, `test_operator`, `test_state` (the operator's review files), `test_checkpoint_split` + `test_checkpoint_trace` (the operator's resumability store, 0012 — moved with their modules in 0016) |
 | `data/` | `test_models`, `test_config` |
-| `tooling/` | `test_artifact_store` (0014), `test_channels` + `test_channel_tools` (0015: channels are tooling over the core `send` primitive), `test_framework_tools` + `test_events_tool` (the framework-surface tools, moved out of the framework package in 0016) |
+| `tooling/` | `test_artifact_store` (0014), `test_channels` + `test_channel_tools` (0015: channels are tooling over the core `send` primitive), `test_framework_tools` + `test_events_tool` (the framework-surface tools, moved out of the framework package in 0016), `test_fabrication` (the default agent, moved from `llm/` by 0017) |
 | `benchmark/` | `test_benchmark` |
 | (top) | `test_imp001_acceptance` — D1–D5 end-to-end acceptance fixture; `test_integration` — the real modules wired by `build_runtime` |
 

@@ -4,7 +4,7 @@ Moved verbatim from the pump loop in ``runtime.py`` (the loop concern): the
 best-effort calls to the fabrication kit's ``ensure_fabrication`` re-seeder.
 A broken/deleted fabrication (e.g. ``__runner = 42``) is re-seeded — before
 the runner is advanced — so the agent continues instead of failing. The
-re-seed itself lives in the kit (``dhc.llm.fabrication``); this module only
+re-seed itself lives in the kit (``dhc.tooling.fabrication``); this module only
 wraps the call sites' best-effort error handling.
 """
 

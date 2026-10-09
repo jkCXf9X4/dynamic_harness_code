@@ -39,8 +39,8 @@ is the single meeting point.
 
 | module | what it is |
 |---|---|
-| `runtime.py` | The runtime orchestrator: agent registry, thread-per-agent placement, worker loop (driver → turn → settle), at-most-once completion dispatch, cancellation, and the directed-message primitive `send` (0015) |
-| `loop.py` | The worker pump: driver → turn → settle, fabrication ensure/re-seed between steps |
+| `runtime.py` | The runtime orchestrator: agent registry, thread-per-agent placement, at-most-once completion dispatch, cancellation, the directed-message primitive `send` (0015), and the birth-kit seam `kit_factory` (0017) |
+| `pump.py` | The pump — the machinery that drives agent-authored `__runner__` loops one yield-window per step (renamed from `loop.py`, 0017: the framework owns the pump, not the loop), plus the yield vocabulary (`Await`/`Poll`/`Sleep`) and the legacy turn loop for non-REPL engines |
 | `repl.py` | Per-agent persistent REPL engine (INFO-050): one private workspace per agent, serialized turns, crash containment |
 | `agent.py` | The in-code agent surface: `Agent` (what action blocks see as `agent`) and `AgentHandle` (the parent's await/poll/cancel handle) |
 | `event_stream.py` | Event stream, runtime-owned event bus, and completion dispatcher (persist-before-execute, at-most-once) |
@@ -56,7 +56,10 @@ is the single meeting point.
 | `llm.py` | Provider abstraction (`LLMProvider` / `OpenAIProvider`), the mock path (`MockLLM`), timeout containment, context-rot detection |
 | `driver.py` | The pluggable brain: `LLMDriver` (real) and `MockDriver` (deterministic) turn a requirement into coded action blocks |
 | `prompts.py` | Single place prompts are shaped: static system prompt (`agent_system_prompt.txt`) + steerage block, composed once for prompt caching |
-| `fabrication.py` | The fabrication kit (IMP-001 D4): default `__runner` + `decide(context)` and the workspace citizens |
+
+A pure provider leaf since 0017: the framework never imports this package —
+the default agent that wraps a driver into a workspace `decide` lives in
+`tooling/fabrication.py`.
 
 ### ui/ — the operator's side
 
@@ -84,6 +87,7 @@ patterns and persistence stack.
 
 | module | what it is |
 |---|---|
+| `fabrication.py` | The default agent (IMP-001 D4, moved from `llm/` by 0017): the fabrication kit a workspace is born with — default `__runner__` + `decide` + context + checkpoint/rollback/compact + caps view + `build_prompt` — handed to the runtime via `Runtime(kit_factory=...)` |
 | `framework_tools.py` | The framework-surface tools: `list_tools` + `events` as REPL namespace callables + `register_default_tools` (moved out of the framework package, 0016) |
 | `channels.py` | The communication policies over the core `send` primitive: `Messenger` (inbox view), `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel` |
 | `channel_tools.py` | The channels' REPL tools (`room`, `messenger`, `escalate`, `ask_operator`, `post`, `channel_read`) + `register_channel_tools` |

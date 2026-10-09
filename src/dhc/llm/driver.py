@@ -57,7 +57,7 @@ def _workspace_context(runtime: Any, agent_id: str) -> Optional[Any]:
     """Return the agent's fabrication context (the kit's ``state`` holder).
 
     Best-effort: the context is the workspace ``context`` citizen (a
-    :class:`~dhc.llm.fabrication.FabricationContext`); anything else (no
+    :class:`~dhc.tooling.fabrication.FabricationContext`); anything else (no
     workspace yet, a broken/deleted context) returns ``None``. The driver
     uses it to reach the persistent ``state`` dict — the same seam
     ``state["_driver"]`` lives in — without importing the kit.

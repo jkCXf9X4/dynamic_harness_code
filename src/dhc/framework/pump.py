@@ -1,11 +1,21 @@
-"""The agent worker loop (the LOOP concern, extracted from ``runtime.py``).
+"""The pump: the machinery that drives agent-authored loops (decision 0017).
+
+Renamed from ``loop.py`` to say what it is: the framework owns the PUMP —
+the machinery and its guarantees — not the agent's loop. The loop itself
+(the ``__runner__`` semantics: how the agent observes, decides, acts, and
+yields) is workspace code the agent views, edits, and replaces
+(``INFO-053``, under agent control); the default loop ships as a
+fabrication the agent starts from, composed at the composition root as
+``dhc.tooling.fabrication`` and handed to the runtime via
+``Runtime(kit_factory=...)``.
 
 Owns the thread-body concern: ``pump_agent`` (the worker entry), the ONE
 pumped loop that drives the agent-authored ``__runner`` generator one
 yield-window per step, the legacy turn loop for non-pump engines, the
-runner install seam, and the yield-servicing park/resume helpers. The
-yield vocabulary (``Await`` / ``Poll`` / ``Sleep``, D3) lives here too —
-it is part of the loop's in-code surface.
+runner install seam (the runner CONTRACT — compile, install, re-install
+custom sources, re-seed via integrity), and the yield-servicing park/resume
+helpers. The yield vocabulary (``Await`` / ``Poll`` / ``Sleep``, D3) lives
+here too — the pump interprets these, so they are framework semantics.
 
 The four hard gates (D2) are enforced on the pump path exactly as before:
 
@@ -30,7 +40,6 @@ from typing import Any, Callable, Optional
 
 from .agent import Agent
 from ..errors import TurnTimeoutError
-from ..llm.fabrication import DEFAULT_RUNNER_SOURCE, fabrication_kit
 from ..data.models import AgentStatus, EventKind, Result, is_terminal
 from . import integrity
 from . import rot as _rot
@@ -243,9 +252,16 @@ def pump_loop(
 ) -> None:
     """The pumped path: drive the agent's ``__runner`` one step at a time.
 
-    Installs the fabrication kit (default ``__runner`` + decide + context)
-    into the engine workspace, then advances the runner one yield-window
-    per iteration under the four hard gates:
+    Births the workspace's fabrication kit (default ``__runner__ + decide +
+    context) via the runtime's ``kit_factory`` seam — decision 0017: the
+    default agent is composition, handed in by the composition root
+    (``wiring.build_runtime`` passes ``tooling.fabrication.fabrication_kit``);
+    the framework drives whatever loop the workspace holds but does not
+    author it. A pumpable runtime without a factory cannot birth an agent
+    and settles failed with a clear reason (containment, not a crash).
+
+    Then advances the runner one yield-window per iteration under the four
+    hard gates:
 
     - settlement at-most-once (``_settle`` / CompletionLog),
     - crash containment (per-step error/timeout classification),
@@ -259,7 +275,18 @@ def pump_loop(
     """
     engine = getattr(runtime, "repl_engine", None) or runtime.engine
     agent = runtime._agents[agent_id]
-    kit = fabrication_kit(runtime, engine, agent)
+    if runtime.kit_factory is None:
+        runtime._settle(
+            agent_id,
+            AgentStatus.failed,
+            reason=(
+                "no fabrication composed: the pumped path requires "
+                "Runtime(kit_factory=...) — the composition root provides "
+                "the default agent"
+            ),
+        )
+        return
+    kit = runtime.kit_factory(runtime, engine, agent)
     if driver is not None:
         kit["state"]["_driver"] = driver
     # The yield vocabulary (D3) is part of the in-code surface: agent
@@ -383,16 +410,16 @@ def pump_loop(
             # Custom-runner seam: an agent that replaced the workspace
             # `__runner` source string gets its own runner compiled from
             # that source. Re-install only when the source changed AND is
-            # not the default source: the wired namespace re-injects the
-            # default `__runner` on every run_block, so a custom runner
-            # that calls run_block must NOT be replaced by the default
-            # runner (we are between steps here, so the runner is never
-            # parked).
+            # not the kit's default (the default comes from the composed
+            # kit, 0017): the wired namespace re-injects the default
+            # `__runner` on every run_block, so a custom runner that calls
+            # run_block must NOT be replaced by the default runner (we
+            # are between steps here, so the runner is never parked).
             source = engine.globals_for(agent_id).get("__runner")
             if (
                 isinstance(source, str)
                 and source != installed_source
-                and source != DEFAULT_RUNNER_SOURCE
+                and source != kit.get("__runner")
             ):
                 installed_source = runtime._install_runner(engine, agent_id, kit, source)
             step_count += 1
@@ -558,17 +585,21 @@ def install_runner(
     """Compile and install the agent's ``__runner`` generator.
 
     The source defaults to the kit's ``__runner`` (the default runner
-    source injected by the fabrication kit). The runner is compiled with
-    the workspace surface + kit as globals — so agent-authored runners can
-    reference in-code names (``spawn``, ``complete``, ``Await``, ...)
-    directly — and receives the kit as its ``ctx`` argument. Returns the
-    installed source (the re-install seam compares it with the workspace
+    source composed with the kit, 0017 — the framework carries the
+    contract, not the content). The runner is compiled with the workspace
+    surface + kit as globals — so agent-authored runners can reference
+    in-code names (``spawn``, ``complete``, ``Await``, ...) directly —
+    and receives the kit as its ``ctx`` argument. Returns the installed
+    source (the re-install seam compares it with the workspace
     ``__runner`` string).
     """
     if source is None:
         source = kit.get("__runner")
     if not isinstance(source, str):
-        source = DEFAULT_RUNNER_SOURCE
+        raise ValueError(
+            "no __runner__ source to install: the fabrication kit must "
+            "provide one (Runtime(kit_factory=...) composes the default)"
+        )
     ns: dict = {"__builtins__": __builtins__}
     ns.update(engine.globals_for(agent_id))
     ns.update(kit)

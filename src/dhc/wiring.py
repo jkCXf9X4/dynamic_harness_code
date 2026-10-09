@@ -57,7 +57,7 @@ from .llm.driver import MockDriver, driver_from_settings
 from .llm.llm import ContextRotDetector
 from .errors import ChannelError, TurnError, TurnTimeoutError
 from .framework.event_stream import CompletionDispatcher, EventBus
-from .llm.fabrication import fabrication_kit
+from .tooling.fabrication import fabrication_kit
 from .ui.operator import Operator
 from .framework.repl import ReplEngine
 from .framework.runtime import Runtime
@@ -274,6 +274,11 @@ def build_runtime(
         engine=None,  # wired below (needs the runtime for agent resolution)
         event_bus=_WiredBus(bus, dispatcher),
         settings=settings,
+        # Decision 0017: the default agent is composition — the birth kit
+        # (default __runner__ + decide + context + helpers) is handed to
+        # the runtime here; the pump drives whatever loop a workspace
+        # holds but never authors it.
+        kit_factory=fabrication_kit,
     )
     raw_engine = ReplEngine()
     engine = _ReplEngineAdapter(

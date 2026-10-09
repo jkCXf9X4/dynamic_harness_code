@@ -33,7 +33,7 @@ from dhc.llm.driver import (  # noqa: E402
 )
 from dhc.llm.llm import ContextRotDetector, RotReport  # noqa: E402
 from dhc.wiring import build_runtime  # noqa: E402
-from dhc.llm.fabrication import fabrication_kit  # noqa: E402
+from dhc.tooling.fabrication import fabrication_kit  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # trim_digest / observe_digest — the trim-50 contract

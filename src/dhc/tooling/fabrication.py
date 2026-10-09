@@ -1,7 +1,8 @@
-"""The fabrication kit (IMP-001 D4): default ``__runner`` + ``decide(context)``.
+"""The fabrication kit (IMP-001 D4): the default agent (decision 0017 home).
 
-Every workspace is born with a fabrication kit whose defaults replicate
-today's behavior exactly:
+The composed side's default implementation of the runner contract: every
+workspace is born with this kit, and its defaults replicate the historical
+behavior exactly —
 
 * ``__runner`` — the default agent loop as a resumable generator, authored as
   workspace code (a string) so the agent can view/edit/replace it. It lives in
@@ -16,14 +17,22 @@ today's behavior exactly:
   the LLM receives.
 * ``context`` — guardrails/inbox/outbox/budgets/digests as ordinary workspace
   data (full transparency, D2).
-* channel handles (``messenger``, ``room``, ``escalate``, ``ask``).
 * checkpoint/rollback/compact helpers and a visible caps view.
 * ``ensure_fabrication`` — re-seeds any fabrication the agent broke or deleted
   (e.g. ``__runner = 42`` -> re-seed the default; event emitted).
 
-The kit is installable and testable WITHOUT the pump (Step 3 rewrites
-``runtime.py``): ``wiring.py`` injects it into the namespace, and tests drive
-the default ``__runner`` directly through ``ReplEngine.advance``.
+Decision 0017: the framework owns the PUMP and the runner CONTRACT — it
+drives whatever loop a workspace holds and re-seeds a broken fabrication
+(between steps, from this kit) — while the loop CONTENT is agent-side
+(INFO-053: the default loop "ships as a fabrication the agent starts
+from"). This module is therefore composition: the composition root
+(wiring.build_runtime) hands fabrication_kit to the runtime via
+Runtime(kit_factory=...), and the pump calls it at workspace birth. The
+kit is installable and testable WITHOUT the pump: wiring.py also injects
+it into the namespace, and tests drive the default ``__runner`` directly
+through ``ReplEngine.advance``. The communication channels are NOT kit
+members — they are registered tools over the core ``send`` primitive
+(decision 0015, dhc.tooling.channel_tools).
 """
 
 from __future__ import annotations
@@ -31,7 +40,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ..framework.context import make_observe as _context_make_observe
-from .driver import default_build_prompt, driver_from_settings
+from ..llm.driver import default_build_prompt, driver_from_settings
 from ..data.models import AgentStatus, EventKind
 
 #: The default agent loop, authored as workspace code (IMP-001 D4).

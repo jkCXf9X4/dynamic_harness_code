@@ -85,7 +85,13 @@ relay itself — is framework. The
 artifact contract is the worked example: its *vocabulary* — the
 content-addressed `Artifact` model, the disclosure tiers, the
 `artifact_published` event — is framework; its *medium*, the store holding
-the bodies, is tooling.
+the bodies, is tooling. The agent loop is the second: the pump, the runner
+contract (compile, install, re-install, re-seed), and the yield vocabulary
+are framework; the default agent — the fabrication kit a workspace is born
+with, default `__runner__` and `decide` included — is composed tooling
+(`dhc.tooling.fabrication`, handed in via `Runtime(kit_factory=...)` at the
+composition root, `0017`). The runtime guarantees a loop exists and
+enforces around it; what the loop does is the agent's.
 
 ## Owns
 - The product-level control split: the agent-controlled surface, the

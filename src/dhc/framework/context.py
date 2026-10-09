@@ -4,7 +4,7 @@ The event-stream digest is the ONLY real pruning in the system: after every
 ``run_block`` the default loop's ``observe`` step appends the agent's fresh
 events to the workspace digest and keeps only the last
 :data:`DIGEST_KEEP` entries. This module makes that trigger explicit and
-testable; :mod:`dhc.llm.fabrication`'s ``make_observe`` is a thin delegate
+testable; :mod:`dhc.tooling.fabrication`'s ``make_observe`` is a thin delegate
 with identical semantics.
 
 The companion :class:`~dhc.llm.llm.ContextRotDetector` is observe-only: it

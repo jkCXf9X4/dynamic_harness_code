@@ -9,10 +9,15 @@ event kind, and knows communication only as the directed-message primitive
 
 This test locks the dependency directions and the folder hierarchy itself:
 
-* no module under ``dhc.framework`` may import ``dhc.tooling`` or ``dhc.ui``
-  (the composition root, ``dhc.wiring``, is the only meeting point);
+* no module under ``dhc.framework`` may import ``dhc.tooling``, ``dhc.ui``,
+  or ``dhc.llm`` (the composition root, ``dhc.wiring``, is the only
+  meeting point; the framework imports only ``data`` + ``errors``);
 * the framework package ships ZERO tools — no ``*tools*`` module may appear
   under ``dhc/framework/``; every REPL tool home lives in ``dhc.tooling``;
+* the framework owns the PUMP, not the loop (0017): ``pump.py`` is the
+  machinery; the default agent — the fabrication kit a workspace is born
+  with — lives in ``dhc.tooling.fabrication`` and is handed in via
+  ``Runtime(kit_factory=...)``;
 * the operator's files (review state, resumability) live in ``dhc.ui``.
 """
 
@@ -58,6 +63,14 @@ def test_core_does_not_import_ui():
     assert not leaks, f"framework core imported the operator surface: {leaks}"
 
 
+def test_core_does_not_import_llm():
+    """Decision 0017: the framework never imports the provider plumbing —
+    the default agent that wraps a driver is composition, not core."""
+    _import_all_framework_modules()
+    leaks = _leaks_from("dhc.llm")
+    assert not leaks, f"framework core imported provider plumbing: {leaks}"
+
+
 def test_framework_package_ships_zero_tools():
     """Decision 0016: the framework package contains no tools modules —
     everything installed into agent REPL namespaces lives in dhc.tooling."""
@@ -74,6 +87,53 @@ def test_framework_package_ships_zero_tools():
         "artifact_tools.py",
     ):
         assert (tooling_dir / expected).exists(), f"missing tool home: {expected}"
+
+
+def test_framework_owns_the_pump_not_the_loop():
+    """Decision 0017: the machinery is ``pump.py`` (renamed from loop.py —
+    the framework drives agent-authored loops, it does not author them);
+    the default agent (the fabrication kit) lives in tooling."""
+    framework_dir = Path(dhc.framework.__file__).parent
+    assert (framework_dir / "pump.py").exists()
+    assert not (framework_dir / "loop.py").exists()
+
+    tooling_dir = Path(dhc.tooling.__file__).parent
+    assert (tooling_dir / "fabrication.py").exists(), (
+        "the default agent (fabrication kit) must live in dhc.tooling"
+    )
+
+
+def test_pump_without_kit_factory_settles_failed():
+    """Decision 0017, the seam's failure mode: a pumpable runtime with no
+    composed default agent cannot birth a workspace and settles failed
+    with a clear reason (containment, not a crash)."""
+    from dhc.framework.repl import ReplEngine
+    from dhc.framework.runtime import Runtime
+    from dhc.data.models import AgentStatus
+
+    rt = Runtime(engine=ReplEngine())
+    assert rt.kit_factory is None
+    assert rt._supports_pump() is True
+    try:
+        handle = rt.spawn("do something")
+        completion = handle.await_()
+        assert completion.status is AgentStatus.failed
+        assert "no fabrication composed" in (completion.reason or "")
+    finally:
+        rt.stop()
+
+
+def test_composition_root_hands_in_the_default_agent(tmp_path):
+    """Decision 0017: build_runtime composes the default agent — the
+    runtime it builds carries the fabrication kit factory from tooling."""
+    from dhc.wiring import build_runtime
+
+    rt = build_runtime(mock=True, artifact_root=tmp_path)
+    try:
+        assert rt.kit_factory is not None
+        assert rt.kit_factory.__module__ == "dhc.tooling.fabrication"
+    finally:
+        rt.stop()
 
 
 def test_operator_files_live_on_the_operator_side():

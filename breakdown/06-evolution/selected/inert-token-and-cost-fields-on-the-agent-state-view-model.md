@@ -54,7 +54,7 @@ and a task contract before code changes begin (change pipeline).
 
 | Module | Change |
 |---|---|
-| `src/dhc/framework/loop.py` (or the `decide` seam in `fabrication.py`) | Accumulate `LLMResponse.usage`/`cost_usd` into the agent's state on each driver call. |
+| `src/dhc/framework/pump.py` (or the `decide` seam in `fabrication.py`) | Accumulate `LLMResponse.usage`/`cost_usd` into the agent's state on each driver call. |
 | `src/dhc/ui/state.py` | `AgentNode` reads the accumulated values (no new fields needed — the fields already exist). |
 | `tests/` (state/loop tests) | A usage-propagation test: a call with usage populates the node; a call without usage leaves it zero. |
 

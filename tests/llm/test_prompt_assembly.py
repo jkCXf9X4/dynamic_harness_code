@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dhc.llm.driver import LLMDriver, MockDriver  # noqa: E402
 from dhc.llm.llm import MockLLM  # noqa: E402
-from dhc.llm.fabrication import fabrication_kit  # noqa: E402
+from dhc.tooling.fabrication import fabrication_kit  # noqa: E402
 from dhc.wiring import build_runtime  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -188,7 +188,7 @@ def test_golden_default_prompt_no_acceptance_no_context():
 
 def test_build_prompt_is_a_kit_citizen(tmp_path):
     """The fabrication kit installs ``build_prompt`` in the workspace."""
-    from dhc.llm.fabrication import FABRICATION_NAMES
+    from dhc.tooling.fabrication import FABRICATION_NAMES
 
     rt = build_runtime(mock=True, artifact_root=str(tmp_path))
     try:
@@ -248,7 +248,7 @@ def test_agent_replacing_build_prompt_changes_the_llm_prompt(tmp_path):
 
 def test_swapped_build_prompt_reaches_the_llm(tmp_path):
     """Unit-level: the workspace-name override is what the LLM sees."""
-    from dhc.llm.fabrication import fabrication_kit
+    from dhc.tooling.fabrication import fabrication_kit
 
     seen = []
 

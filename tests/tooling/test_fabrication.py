@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dhc.framework.agent import Agent, AgentHandle  # noqa: E402
 from dhc.llm.driver import MockDriver  # noqa: E402
-from dhc.llm.fabrication import (  # noqa: E402
+from dhc.tooling.fabrication import (  # noqa: E402
     DEFAULT_RUNNER_SOURCE,
     FABRICATION_NAMES,
     FabricationContext,

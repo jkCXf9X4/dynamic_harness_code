@@ -84,6 +84,12 @@ hierarchy — very clear when browsing the repo.
   parts from composed parts — real surgery, out of scope. The
   framework → llm import direction therefore remains, guarded only
   against `tooling` and `ui`.
+  **Resolved by `0017`:** the framework owns the pump and the runner
+  contract (renamed `framework/pump.py`); the default agent — the
+  whole fabrication kit — moved to `dhc.tooling.fabrication` and is
+  handed in via `Runtime(kit_factory=...)` at the composition root;
+  the framework now imports only `data` + `errors` (the guard also
+  forbids `llm`).
 - `tests/framework` is the slow directory (the runtime suites); the
   framework/tools/ui/tooling split of tests makes the suite's geography
   readable too.
