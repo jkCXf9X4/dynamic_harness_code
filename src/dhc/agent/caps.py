@@ -184,12 +184,16 @@ def cap_hit(
     """
     budgets = agent_budgets(engine, agent_id)
     # Wall clock (safety.timeout_seconds), parked time credited (0008).
+    # H-04 (decision 0010): the comparison is MONOTONIC on both sides —
+    # started_ts is set with time.monotonic() by the pump, and the credit
+    # is measured with time.monotonic() by the pump's park servicing. One
+    # base end-to-end: a wall-clock jump can neither trip nor mask the cap.
     timeout_seconds, wall_src = clamp_limit(
         read_cap(settings, "timeout_seconds", _DEFAULT_TIMEOUT_SECONDS),
         budgets.get("wall_clock"),
     )
     if timeout_seconds is not None and (
-        time.time() - started_ts - max(parked_seconds, 0.0) > timeout_seconds
+        time.monotonic() - started_ts - max(parked_seconds, 0.0) > timeout_seconds
     ):
         return {"cap": "wall_clock", "limit": timeout_seconds, "source": wall_src}
     # Step count (safety.max_iterations).

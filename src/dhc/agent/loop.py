@@ -275,7 +275,12 @@ def pump_loop(
     installed_source = runtime._install_runner(engine, agent_id, kit)
 
     step_count = 0
-    started_ts = time.time()
+    # H-04 (IMP-003, decision 0010): the ceiling's origin is a MONOTONIC
+    # timestamp — the same base as the parked-credit measurement below
+    # (0008's recorded interaction: the credit and started_ts must share
+    # one base or the subtraction mixes clocks). A wall-clock jump can
+    # then neither trip nor mask the wall-clock cap.
+    started_ts = time.monotonic()
     # Cumulative seconds this agent spent parked on `yield Await` /
     # `yield Sleep` (decision 0008): parked time is credited against the
     # wall-clock ceiling — waiting on others consumes no agent budget
