@@ -33,6 +33,7 @@ from ..errors import TurnTimeoutError
 from ..llm.fabrication import DEFAULT_RUNNER_SOURCE, fabrication_kit
 from ..data.models import AgentStatus, EventKind, Result, is_terminal
 from . import integrity
+from . import rot as _rot
 
 #: Default step timeout for the pump when settings provide none (seconds).
 _DEFAULT_STEP_TIMEOUT = 120.0
@@ -298,15 +299,25 @@ def pump_loop(
             # in completion order (INFO-039/047).
             runtime._drain_completions(agent_id)
             # Caps watchdog: ceiling caps are hard gates (D2). Parked time
-            # is credited against the wall clock (0008).
-            cap = runtime._caps_watchdog(
+            # is credited against the wall clock (0008). G-01: the
+            # agent's working budgets (context.budgets) are min-clamped
+            # onto the ceilings inside the predicate — the effective limit
+            # is min(agent_budget, ceiling), evaluated here in pump code
+            # (never in agent code), so an agent budget can only tighten a
+            # limit, never loosen one (R3).
+            hit = runtime._caps_hit(
                 agent_id, engine, step_count, started_ts, parked_seconds=parked_seconds
             )
-            if cap is not None:
+            if hit is not None:
+                cap = hit["cap"]
                 runtime._emit(
                     agent_id,
                     EventKind.crash,
-                    payload={"cap": cap, "limit": runtime._cap_limit(cap)},
+                    payload={
+                        "cap": cap,
+                        "limit": hit["limit"],
+                        "source": hit["source"],
+                    },
                 )
                 try:
                     engine.kill(agent_id)
@@ -316,6 +327,46 @@ def pump_loop(
                     agent_id,
                     AgentStatus.failed,
                     reason=f"cap exceeded: {cap}",
+                )
+                return
+            # Rot tripwire (G-06): the agent's rot policy
+            # (``context.rot_policy``) is ordinary workspace data; when it
+            # escalates, a rotting context trips HERE — between agent
+            # actions, in pump code (R6) — so a degrading agent cannot
+            # skip its own leash. The reaction is parent-side (A6): the
+            # settle publishes the completion to the parent's stream; the
+            # child never executes its own termination. Default policy is
+            # observe-only (INFO-021), so nothing changes unless the agent
+            # escalates.
+            trip = _rot.rot_trip(agent, engine, agent_id)
+            if trip is not None:
+                runtime._emit(
+                    agent_id,
+                    EventKind.crash,
+                    payload={
+                        "rot": {
+                            "score": trip["score"],
+                            "signals": trip["signals"],
+                            "threshold": trip["threshold"],
+                        },
+                        "source": "agent_rot_policy",
+                    },
+                )
+                try:
+                    engine.kill(agent_id)
+                except Exception:  # noqa: BLE001 - kill is best-effort
+                    pass
+                runtime._settle(
+                    agent_id,
+                    AgentStatus.failed,
+                    reason=(
+                        "context rot: score={score} threshold={threshold} "
+                        "signals={signals}".format(
+                            score=trip["score"],
+                            threshold=trip["threshold"],
+                            signals=",".join(trip["signals"]) or "none",
+                        )
+                    ),
                 )
                 return
             # IMP-001 Step 5 (D4): ensure the fabrication is intact

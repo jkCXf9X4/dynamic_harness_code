@@ -75,10 +75,10 @@ FABRICATION_NAMES: tuple[str, ...] = (
 class FabricationContext:
     """The ``context`` workspace citizen (IMP-001 D4).
 
-    Carries the agent's guardrails, inbox, outbox, budgets and digests as
-    ordinary workspace data (full transparency, D2), plus the workspace state
-    dict the default ``decide`` fabrication uses for its bookkeeping
-    (``_turns``/``_calls`` moved into workspace state).
+    Carries the agent's guardrails, inbox, outbox, budgets, rot policy and
+    digests as ordinary workspace data (full transparency, D2), plus the
+    workspace state dict the default ``decide`` fabrication uses for its
+    bookkeeping (``_turns``/``_calls`` moved into workspace state).
     """
 
     def __init__(
@@ -96,6 +96,7 @@ class FabricationContext:
         self.inbox = self.state.setdefault("inbox", [])
         self.outbox = self.state.setdefault("outbox", [])
         self.budgets = self.state.setdefault("budgets", {})
+        self.rot_policy = self.state.setdefault("rot_policy", {})
         self.digests = self.state.setdefault("digests", {})
 
     def as_dict(self) -> dict:
@@ -108,6 +109,7 @@ class FabricationContext:
             "inbox": self.inbox,
             "outbox": self.outbox,
             "budgets": self.budgets,
+            "rot_policy": self.rot_policy,
             "digests": self.digests,
         }
 
