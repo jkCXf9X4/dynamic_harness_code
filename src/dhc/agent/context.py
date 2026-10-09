@@ -24,8 +24,17 @@ def trim_digest(digest: List[Any], keep: int = DIGEST_KEEP) -> List[Any]:
 
     Identical semantics to the historical ``del digest[:-50]``: when the
     digest is shorter than *keep* it is left untouched.
+
+    *keep* is sanitized: ``None`` and negative values are treated as 0
+    (drop everything). Note that ``keep=0`` must NOT be implemented as
+    ``del digest[:-0]`` — ``[:-0]`` is the empty slice ``[:0]``, a no-op.
     """
-    del digest[:-keep]
+    if keep is None or keep < 0:
+        keep = 0
+    if keep:
+        del digest[:-keep]
+    else:
+        del digest[:]
     return digest
 
 

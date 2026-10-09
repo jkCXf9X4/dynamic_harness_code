@@ -73,6 +73,26 @@ class TestTrimDigest:
     def test_digest_keep_is_50(self):
         assert DIGEST_KEEP == 50
 
+    def test_keep_zero_returns_empty(self):
+        """keep=0 must drop everything (H-01: ``del digest[:-0]`` was a no-op)."""
+        digest = list(range(10))
+        out = trim_digest(digest, keep=0)
+        assert out == []
+        assert out is digest  # still in place
+
+    def test_keep_zero_empty_digest(self):
+        digest = []
+        assert trim_digest(digest, keep=0) is digest
+        assert digest == []
+
+    def test_negative_keep_sanitized_to_zero(self):
+        digest = list(range(10))
+        assert trim_digest(digest, keep=-3) == []
+
+    def test_none_keep_sanitized_to_zero(self):
+        digest = list(range(10))
+        assert trim_digest(digest, keep=None) == []
+
 
 class TestObserveDigest:
     def test_extends_and_trims(self):
@@ -101,6 +121,11 @@ class TestObserveDigest:
         state = {}
         observe_digest(state, list(range(10)), keep=3)
         assert state["digests"]["events"] == [7, 8, 9]
+
+    def test_keep_zero_drops_all(self):
+        state = {}
+        observe_digest(state, list(range(10)), keep=0)
+        assert state["digests"]["events"] == []
 
 
 # --------------------------------------------------------------------------- #
