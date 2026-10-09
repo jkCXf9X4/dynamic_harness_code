@@ -14,32 +14,45 @@ Importable without an API key: the mock path (MockDriver / MockLLM) is the
 documented test and demo path; the real LLM path activates only when
 ``OPENAI_API_KEY`` is set.
 
-Layout (src layout, REV 2):
-    agent/    agent-controlled execution core (runtime, repl, agent, tools,
-              state, checkpoint, event_stream) — store/channel-unaware
-              (0014/0015); owns the directed-message primitive (send)
-    llm/      provider plumbing (llm, driver, prompts, fabrication)
-    ui/       operator surface (terminal, operator)
-    data/     schemas, config (models, config, trace)
-    tooling/  operator tooling: artifact store, boundary log, communication
-              channels, and their namespace tools (0014/0015)
+Layout (src layout, REV 3 — decision 0016: the framework/composition split
+is the folder hierarchy itself):
+
+    framework/  THE FRAMEWORK — the control loop and its guarantees:
+                runtime, loop, agent surface, per-agent REPL, event
+                stream/bus/completion dispatcher, context triggers, rot
+                policy, caps watchdog, integrity — plus the directed-message
+                primitive (``send``, 0015). Ships ZERO tools: nothing that
+                gets installed into an agent REPL namespace lives here.
+                Depends only on data/ and errors/.
+    tooling/    THE AGENT'S COMPOSED WORLD — everything installed into agent
+                REPL namespaces beyond the core actions: the framework
+                tools (list_tools, events), the communication channels and
+                their tools, the artifact store and its tools, and the
+                adapters bridging them onto runtime seams (0014/0015/0016).
+                One-way dependent on the framework.
+    ui/         THE OPERATOR'S SIDE — the operator door, the interactive
+                terminal, the operator's review files (state) and
+                resumability store (checkpoint, 0012).
+    llm/        provider plumbing (llm, driver, prompts, fabrication)
+    data/       shared vocabulary both sides import (models, config, trace)
     benchmark/  unchanged subpackage
-    cli.py, wiring.py, errors.py  top-level (entry point, composition root,
-              cross-cutting error hierarchy)
+    wiring.py   THE COMPOSITION ROOT — the only module that imports both
+                framework and tooling (and ui)
+    cli.py, errors.py  entry point; cross-cutting error hierarchy
 """
 
 from . import (
-    agent,
     benchmark,
     cli,
     data,
     errors,
+    framework,
     llm,
     tooling,
     ui,
     wiring,
 )
-from .agent.agent import Agent, AgentHandle, ToolResult, bash
+from .framework.agent import Agent, AgentHandle, ToolResult, bash
 from .tooling.channels import (
     EscalationChannel,
     Messenger,
@@ -58,7 +71,7 @@ from .errors import (
     TurnError,
     TurnTimeoutError,
 )
-from .agent.event_stream import CompletionDispatcher, EventBus, EventStream
+from .framework.event_stream import CompletionDispatcher, EventBus, EventStream
 from .llm.llm import ContextRotDetector, LLMClient, MockLLM, RotReport
 from .data.models import (
     TERMINAL_STATES,
@@ -76,8 +89,8 @@ from .data.models import (
     is_terminal,
 )
 from .ui.operator import ChatSession, DefaultDriver, Operator
-from .agent.repl import ReplEngine
-from .agent.runtime import Runtime
+from .framework.repl import ReplEngine
+from .framework.runtime import Runtime
 from .wiring import build_runtime
 
 __version__ = "0.1.0"

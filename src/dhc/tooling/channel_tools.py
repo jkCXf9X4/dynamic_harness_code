@@ -195,7 +195,7 @@ def register_channel_tools(
 ) -> None:
     """Install the channel tools as namespace callables on *runtime*.
 
-    Same mechanics as ``dhc.agent.tools.register_default_tools``: the
+    Same mechanics as ``dhc.tooling.framework_tools.register_default_tools``: the
     runtime's namespace builder (``_build_namespace``) is wrapped so each
     agent's turn namespace gains the channel tools bound to that agent. The
     framework core is untouched: it keeps its slim base namespace (with the

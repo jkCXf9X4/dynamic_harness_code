@@ -131,6 +131,11 @@ constructors must not expose a store parameter.
   two packages: `ui/` (the interaction surface, including state *renderers*
   such as the `/artifacts` viewer) and `tooling/` (state *infrastructure*);
   the classifier classifies concerns, the guard test enforces the core seam.
+  **Resolved by `0016`:** `state` → `dhc.ui.state` and `checkpoint` →
+  `dhc.ui.checkpoint` (the operator's side — both are the operator's
+  files), the framework package is renamed `dhc.framework` with zero
+  tools inside it, and the tools layer itself moved to
+  `dhc.tooling.framework_tools`.
 
 ## Rejected alternatives
 

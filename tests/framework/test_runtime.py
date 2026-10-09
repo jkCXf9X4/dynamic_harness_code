@@ -1,4 +1,4 @@
-"""Tests for dhc.agent and dhc.runtime.
+"""Tests for dhc.framework and dhc.runtime.
 
 Uses scripted drivers and fakes only — no real LLM, no real REPL, no real
 artifact store. The runtime's injected collaborators are duck-typed, so the
@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from dhc.agent.agent import Agent, AgentHandle, ToolResult
+from dhc.framework.agent import Agent, AgentHandle, ToolResult
 from dhc.errors import ChannelError
 from dhc.data.models import (
     TERMINAL_STATES,
@@ -22,7 +22,7 @@ from dhc.data.models import (
     ToolOutput,
     is_terminal,
 )
-from dhc.agent.runtime import Runtime
+from dhc.framework.runtime import Runtime
 
 
 # --------------------------------------------------------------------------- #

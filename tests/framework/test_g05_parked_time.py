@@ -18,7 +18,7 @@ from dhc.data.models import AgentStatus, EventKind, is_terminal
 
 
 # --------------------------------------------------------------------------- #
-# Helpers (same shape as tests/agent/test_runtime.py)
+# Helpers (same shape as tests/framework/test_runtime.py)
 # --------------------------------------------------------------------------- #
 
 

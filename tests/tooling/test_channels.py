@@ -110,7 +110,7 @@ def test_messenger_is_a_view_delivery_is_core():
     """The Messenger is a VIEW over the stream (decision 0015): with no
     Messenger, a receiver-addressed message event still lands on the
     recipient's stream — the runtime's send delivers, not the channel."""
-    from dhc.agent.event_stream import EventBus
+    from dhc.framework.event_stream import EventBus
 
     bus = EventBus()
     bus.publish(_message_event("alice", "bob", "hi"))

@@ -14,7 +14,7 @@ import threading
 import time
 
 from dhc.data.models import Result
-from dhc.agent.repl import ReplEngine
+from dhc.framework.repl import ReplEngine
 
 
 def read(engine, agent_id, expr):

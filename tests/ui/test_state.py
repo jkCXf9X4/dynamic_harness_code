@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from dhc.agent.agent import Agent
+from dhc.framework.agent import Agent
 from dhc.data.models import AgentStatus, Event, EventKind, Result
-from dhc.agent.runtime import Runtime
-from dhc.agent.state import (
+from dhc.framework.runtime import Runtime
+from dhc.ui.state import (
     TERMINAL_EVENT_KINDS,
     AgentNode,
     StateWriter,

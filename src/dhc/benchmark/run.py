@@ -37,7 +37,7 @@ from typing import Any, Callable, Iterator, Optional
 from ..data.config import get_settings
 from ..llm.driver import MockDriver, driver_from_settings
 from ..data.models import AgentStatus
-from ..agent.runtime import Runtime
+from ..framework.runtime import Runtime
 from ..wiring import build_runtime
 from .metrics import RunMetrics, collect_metrics
 from .scoring import format_scores

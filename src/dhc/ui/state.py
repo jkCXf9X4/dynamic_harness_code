@@ -1,5 +1,8 @@
 """Persist run overview + event stream to files for manual review.
 
+Decision 0016 home: the operator's side (``dhc.ui``) — these are the
+OPERATOR's review files, not framework machinery and not agent tooling.
+
 Adopts the reference project's ``cli/state.py`` + ``cli/present.py`` pattern:
 the terminal keeps prompts and a final outcome line; everything else that was
 previously rendered live (agent tree, status, events) is written as files

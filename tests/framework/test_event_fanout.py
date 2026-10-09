@@ -20,8 +20,8 @@ import threading
 import time
 from pathlib import Path
 
-from dhc.agent.runtime import Runtime, _MemoryBus
-from dhc.agent.state import StateWriter
+from dhc.framework.runtime import Runtime, _MemoryBus
+from dhc.ui.state import StateWriter
 from dhc.data.models import Event, EventKind
 from dhc.llm.driver import LLMDriver
 

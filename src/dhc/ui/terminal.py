@@ -35,7 +35,7 @@ from typing import Any, Callable, Optional
 
 from ..data.config import get_settings, load_config, merge_api_key
 from .operator import Operator
-from ..agent.state import StateWriter, build_agent_tree, build_stats, render_text_tree
+from .state import StateWriter, build_agent_tree, build_stats, render_text_tree
 from ..wiring import build_runtime
 
 #: The prompt shown for each interactive input line.
@@ -218,7 +218,7 @@ class Terminal:
         """Load an agent's persisted checkpoint, or None.
 
         This reads the **operator's** on-disk ``CheckpointStore``
-        (``dhc.agent.checkpoint``) — the operator's resumability mechanism,
+        (``dhc.ui.checkpoint``) — the operator's resumability mechanism,
         surfaced via ``/resume``. It is deliberately separate from the
         agent's own workspace checkpoints (``state["checkpoints"]`` in the
         fabrication kit), which live in the agent's context. The split is

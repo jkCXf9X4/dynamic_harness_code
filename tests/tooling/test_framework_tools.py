@@ -4,7 +4,7 @@ The architectural goal: the CORE is runtime + eventbus + the directed-message
 primitive (``send``, decision 0015); the artifact store (0014), the
 communication channels (0015), and the introspection/event tools are
 REPL-executed Python tools installed by registration functions —
-``dhc.agent.tools.register_default_tools`` for the framework tools,
+``dhc.tooling.framework_tools.register_default_tools`` for the framework tools,
 ``dhc.tooling.register_channel_tools`` for the channel tools, and
 ``dhc.tooling.register_artifact_tools`` for the store tools. These tests
 verify:
@@ -32,10 +32,10 @@ from dhc.tooling.channels import (  # noqa: E402
     OperatorQuestionChannel,
     RoomManager,
 )
-from dhc.agent.event_stream import CompletionDispatcher, EventBus  # noqa: E402
+from dhc.framework.event_stream import CompletionDispatcher, EventBus  # noqa: E402
 from dhc.data.models import Artifact, EventKind  # noqa: E402
-from dhc.agent.runtime import Runtime  # noqa: E402
-from dhc.agent.tools import ToolContext, register_default_tools  # noqa: E402
+from dhc.framework.runtime import Runtime  # noqa: E402
+from dhc.tooling.framework_tools import ToolContext, register_default_tools  # noqa: E402
 from dhc.wiring import _WiredBus  # noqa: E402
 
 CORE_NAMES = {
@@ -97,7 +97,7 @@ def _wired_runtime(tmp_path):
 
 def _namespace(runtime, agent_id="a1"):
     """Build the turn namespace for a fake agent via the runtime's builder."""
-    from dhc.agent.agent import Agent
+    from dhc.framework.agent import Agent
 
     agent = Agent(id=agent_id, requirement="r")
     return runtime._build_namespace(agent)
@@ -165,7 +165,7 @@ def test_default_tools_registration_split(tmp_path):
 
 
 def _fake_agent():
-    from dhc.agent.agent import Agent
+    from dhc.framework.agent import Agent
 
     return Agent(id="a1", requirement="r")
 

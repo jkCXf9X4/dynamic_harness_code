@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import pytest
 
 from dhc.errors import ChannelError
-from dhc.agent.event_stream import CompletionDispatcher, EventBus, EventStream
+from dhc.framework.event_stream import CompletionDispatcher, EventBus, EventStream
 from dhc.data.models import AgentStatus, Completion, Event, EventKind
 
 

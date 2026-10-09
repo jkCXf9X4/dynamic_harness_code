@@ -12,7 +12,7 @@ import pytest
 from dhc.cli import main
 from dhc.data.models import Result
 from dhc.ui.operator import ChatSession, DefaultDriver, Operator
-from dhc.agent.runtime import Runtime
+from dhc.framework.runtime import Runtime
 
 
 # --------------------------------------------------------------------------- #

@@ -16,7 +16,7 @@ and a task contract before code changes begin (change pipeline).
 ## Why — pain and evidence
 
 - **The snapshot path re-derives event identity by string.**
-  `src/dhc/agent/state.py` (`StateWriter.on_event`, lines 364–399) converts
+  `src/dhc/ui/state.py` (`StateWriter.on_event`, lines 364–399) converts
   each event's kind with `kind.value if hasattr(kind, "value") else str(kind)`
   and then branches on **string literals**: `if kind_value == "report"`
   (line 369), `elif kind_value == "failure"` (line 379),
@@ -51,7 +51,7 @@ and a task contract before code changes begin (change pipeline).
 
 | Module | Change |
 |---|---|
-| `src/dhc/agent/state.py` | `on_event` branches on `EventKind` members (or an explicit mapping) instead of string literals; fallback behavior for unknown kinds documented and preserved. |
+| `src/dhc/ui/state.py` | `on_event` branches on `EventKind` members (or an explicit mapping) instead of string literals; fallback behavior for unknown kinds documented and preserved. |
 | `tests/` (state tests) | One test per recognized kind; one test for the unknown-kind fallback. |
 
 ## Containment

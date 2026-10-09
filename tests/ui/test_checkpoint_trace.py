@@ -12,9 +12,9 @@ import stat
 
 import pytest
 
-from dhc.agent.checkpoint import AgentCheckpoint, CheckpointDriver, CheckpointStore
+from dhc.ui.checkpoint import AgentCheckpoint, CheckpointDriver, CheckpointStore
 from dhc.data.models import Result
-from dhc.agent.repl import ReplEngine
+from dhc.framework.repl import ReplEngine
 from dhc.data.trace import ENTRY_TYPES, TraceStore, TracingEngine
 
 

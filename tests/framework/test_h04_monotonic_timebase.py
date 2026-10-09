@@ -211,15 +211,15 @@ def test_h04_no_wall_clock_in_duration_math():
     """Grep-able invariant: the ceiling chain reads no wall clock.
 
     The two modules that own the wall-clock ceiling's duration math
-    (``dhc.agent.caps`` — the comparison; ``dhc.agent.loop`` — the origin
+    (``dhc.framework.caps`` — the comparison; ``dhc.framework.loop`` — the origin
     and the parked-credit measurement) must contain no ``time.time()``
     call: after decision 0010 the only legitimate clock in duration math
     is ``time.monotonic()``. Informational records (``created_ts``,
     ``settled_ts``, event timestamps) live in other modules and stay
     wall-clock by design.
     """
-    import dhc.agent.caps as caps_mod
-    import dhc.agent.loop as loop_mod
+    import dhc.framework.caps as caps_mod
+    import dhc.framework.loop as loop_mod
 
     for mod in (caps_mod, loop_mod):
         source = Path(mod.__file__).read_text(encoding="utf-8")

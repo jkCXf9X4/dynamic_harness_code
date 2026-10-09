@@ -1,21 +1,24 @@
-"""The framework tools layer: introspection and event reads as REPL tools.
+"""The framework-surface tools: list_tools + events as REPL namespace tools.
 
-The architectural goal: the CORE is ``dhc/runtime.py`` + ``dhc/event_stream.py``
-plus the directed-message primitive (``Agent.send`` / ``Runtime.send``,
-decision 0015). This framework-side tools layer installs only what wraps a
-core surface: ``list_tools`` (introspection of the installed tools) and
-``events`` (the agent's own consume-once event read). Channel tools
-(``room``, ``messenger``, ``escalate``, ``ask_operator``, ``post``,
-``channel_read``) live in :mod:`dhc.tooling.channel_tools` — channels are
-operator tooling composed over the core send primitive (decision 0015) — and
-the artifact store tools (``publish``, ``read_artifact``, ``archive``,
-``list_artifacts``) live in :mod:`dhc.tooling.artifact_tools` (decision 0014).
+Decision 0016: this module lives in ``dhc.tooling`` — the agent's composed
+world, everything installed into agent REPL namespaces beyond the core
+actions — because it installs REPL tools, even though the tools themselves
+wrap FRAMEWORK surfaces: ``list_tools`` (introspection of the installed
+tools) and ``events`` (the agent's own consume-once event read over
+``Runtime.tool_events``). The core namespace actions (``spawn``,
+``complete``, ``send``, ...) come from ``dhc.framework`` itself; the
+channel tools (``room``, ``messenger``, ``escalate``, ``ask_operator``,
+``post``, ``channel_read``) live in :mod:`dhc.tooling.channel_tools`
+(channels are tooling composed over the core send primitive, decision
+0015), and the artifact store tools (``publish``, ``read_artifact``,
+``archive``, ``list_artifacts``) live in
+:mod:`dhc.tooling.artifact_tools` (decision 0014).
 
 Tools receive a lightweight :class:`ToolContext` (agent_id + duck-typed
-collaborators), never the :class:`~dhc.agent.Agent` itself — mirroring the
-reference project's ``core/tools/`` separation. The runtime stays slim: its
-base namespace contains only core names; everything else is composed in by
-``dhc/wiring.py`` via the registration functions.
+collaborators), never the :class:`~dhc.framework.agent.Agent` itself —
+mirroring the reference project's ``core/tools/`` separation. The runtime
+stays slim: its base namespace contains only core names; everything else
+is composed in by ``dhc/wiring.py`` via the registration functions.
 """
 
 from __future__ import annotations

@@ -21,7 +21,7 @@ from typing import Optional, Sequence
 
 from .data.config import get_settings
 from .ui.operator import ChatSession, Operator
-from .agent.runtime import Runtime
+from .framework.runtime import Runtime
 
 
 def _default_context_file() -> Path:

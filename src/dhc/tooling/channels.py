@@ -17,7 +17,7 @@ ignore each channel):
 * :class:`OperatorQuestionChannel` — any agent can ask the operator a
   question (INFO-023).
 
-Every channel takes the injected :class:`~dhc.agent.event_stream.EventBus`
+Every channel takes the injected :class:`~dhc.framework.event_stream.EventBus`
 (duck-typed: ``publish(event)``, ``subscribe_global(callback)``) so tests can
 use a fake bus. Events carry the correct :class:`~dhc.data.models.EventKind`
 and payloads are by reference (ids / short values, never live handles).

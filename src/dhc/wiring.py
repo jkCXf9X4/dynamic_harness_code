@@ -26,7 +26,7 @@ other wiring-level attributes.
 * the communication channels (Messenger, RoomManager, EscalationChannel,
   OperatorQuestionChannel) on the same bus — operator tooling (0015)
   composed over the core directed-message primitive (``Runtime.send``)
-* the tools layer (:func:`dhc.agent.tools.register_default_tools` for the
+* the tools layer (:func:`dhc.tooling.framework_tools.register_default_tools` for the
   framework tools, :func:`dhc.tooling.register_channel_tools` for the
   channel tools, :func:`dhc.tooling.register_artifact_tools` for the store
   tools) — exposed as REPL namespace callables, composed in here (the
@@ -56,12 +56,12 @@ from .data.config import get_settings
 from .llm.driver import MockDriver, driver_from_settings
 from .llm.llm import ContextRotDetector
 from .errors import ChannelError, TurnError, TurnTimeoutError
-from .agent.event_stream import CompletionDispatcher, EventBus
+from .framework.event_stream import CompletionDispatcher, EventBus
 from .llm.fabrication import fabrication_kit
 from .ui.operator import Operator
-from .agent.repl import ReplEngine
-from .agent.runtime import Runtime
-from .agent.tools import register_default_tools
+from .framework.repl import ReplEngine
+from .framework.runtime import Runtime
+from .tooling.framework_tools import register_default_tools
 
 
 class _WiredBus:
@@ -172,7 +172,7 @@ def _extend_namespace(
     await_, poll, children_of) — ``send`` is the directed-message primitive
     itself (decision 0015). This composition root installs the framework
     tools (``list_tools``, ``events``) via
-    :func:`dhc.agent.tools.register_default_tools`, the channel tools
+    :func:`dhc.tooling.framework_tools.register_default_tools`, the channel tools
     (rooms, escalation, operator questions, the messenger facade) via
     :func:`dhc.tooling.register_channel_tools` (decision 0015), the artifact
     store tools via :func:`dhc.tooling.register_artifact_tools` (decision
@@ -248,7 +248,7 @@ def build_runtime(
     messenger, escalate, ask_operator, post, channel_read, list_tools,
     events) by :func:`dhc.tooling.register_artifact_tools`,
     :func:`dhc.tooling.register_channel_tools`, and
-    :func:`dhc.agent.tools.register_default_tools` — the composition root,
+    :func:`dhc.tooling.framework_tools.register_default_tools` — the composition root,
     keeping the core (runtime + eventbus + the ``send`` primitive) slim and
     store/channel-unaware (decisions 0014/0015).
 

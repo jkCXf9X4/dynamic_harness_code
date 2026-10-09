@@ -1,15 +1,21 @@
-"""Operator tooling: persistence, channels, and their namespace tools.
+"""The agent's composed world: everything installed into agent REPLs.
 
-The framework core (``dhc.agent``) knows artifacts only as opaque ids and the
-``artifact_published`` event kind (decision 0014), and knows communication
-only as the directed-message primitive (``Runtime.send``, decision 0015).
-Everything composed on top of those contracts lives here: the
-content-addressed store, the boundary event log, the communication channel
-policies (rooms, escalation, operator questions, the inbox view), the
-adapters bridging them onto the runtime's seams, and the namespace tools
-that expose them to agents. The composition root (``wiring.build_runtime``)
-is the only place this package is instantiated; the framework never
-imports it.
+Decisions 0014/0015 drew the boundary; decision 0016 makes it the folder
+hierarchy: the framework (``dhc.framework``) ships zero tools — this
+package is everything an agent gets in its REPL namespace beyond the core
+actions, composed onto the runtime by the composition root
+(``wiring.build_runtime``) and one-way dependent on the framework:
+
+* the framework-surface tools (``list_tools``, ``events``) —
+  :mod:`dhc.tooling.framework_tools`
+* the communication channels and their tools —
+  :mod:`dhc.tooling.channels` / :mod:`dhc.tooling.channel_tools`
+* the artifact store, the boundary log, the store tools, and the adapters
+  bridging them onto runtime seams — :mod:`dhc.tooling.artifact_store` /
+  :mod:`dhc.tooling.artifact_tools` / :mod:`dhc.tooling.adapters`
+
+The framework never imports this package; the composition root is the
+only instantiator.
 """
 
 from .adapters import BoundarySink, StoreAdapter
@@ -26,6 +32,7 @@ from .channels import (
     RoomManager,
 )
 from .channel_tools import register_channel_tools
+from .framework_tools import ToolContext, register_default_tools
 
 __all__ = [
     "ArtifactStore",
@@ -39,4 +46,6 @@ __all__ = [
     "EscalationChannel",
     "OperatorQuestionChannel",
     "register_channel_tools",
+    "ToolContext",
+    "register_default_tools",
 ]

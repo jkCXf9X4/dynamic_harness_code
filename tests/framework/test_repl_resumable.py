@@ -11,7 +11,7 @@ covers the unchanged execute/reset/globals_for/has_workspace contract.
 import time
 
 from dhc.data.models import Result
-from dhc.agent.repl import AdvanceOutcome, ReplEngine
+from dhc.framework.repl import AdvanceOutcome, ReplEngine
 
 
 def read(engine, agent_id, expr):

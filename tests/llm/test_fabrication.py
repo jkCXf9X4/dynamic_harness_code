@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dhc.agent.agent import Agent, AgentHandle  # noqa: E402
+from dhc.framework.agent import Agent, AgentHandle  # noqa: E402
 from dhc.llm.driver import MockDriver  # noqa: E402
 from dhc.llm.fabrication import (  # noqa: E402
     DEFAULT_RUNNER_SOURCE,
@@ -342,7 +342,7 @@ def test_ensure_fabrication_self_guard_no_recursion(tmp_path):
 
         # Drive the guard the way the pump does: through the kit-owned
         # closure, NOT the (broken) workspace copy.
-        from dhc.agent import integrity
+        from dhc.framework import integrity
         integrity.ensure_fabrication(kit)
 
         # The workspace copy is re-seeded to a callable (the kit's closure).

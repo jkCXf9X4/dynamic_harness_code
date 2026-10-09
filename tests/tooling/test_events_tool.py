@@ -30,8 +30,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dhc.data.models import AgentStatus, EventKind  # noqa: E402
-from dhc.agent.runtime import Runtime  # noqa: E402
-from dhc.agent.tools import register_default_tools  # noqa: E402
+from dhc.framework.runtime import Runtime  # noqa: E402
+from dhc.tooling.framework_tools import register_default_tools  # noqa: E402
 from dhc.llm.driver import MockDriver  # noqa: E402
 
 
@@ -46,7 +46,7 @@ def test_events_tool_consume_once():
     the first."""
     runtime = Runtime()
     register_default_tools(runtime)
-    from dhc.agent.agent import Agent
+    from dhc.framework.agent import Agent
 
     agent = Agent(id="a1", requirement="r")
     ns = runtime._build_namespace(agent)

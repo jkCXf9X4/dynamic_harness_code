@@ -7,7 +7,7 @@ as content-addressed artifacts and emit the framework's
 store, only the event.
 
 Installed by :func:`register_artifact_tools` with the same namespace-wrapping
-mechanics as ``dhc.agent.tools.register_default_tools``; the composition root
+mechanics as ``dhc.tooling.framework_tools.register_default_tools``; the composition root
 (``wiring.build_runtime``) is the caller. The four tools are the ONLY
 namespace names this module contributes.
 """
@@ -155,7 +155,7 @@ def register_artifact_tools(
 ) -> None:
     """Install the artifact store tools as namespace callables on *runtime*.
 
-    Same mechanics as ``dhc.agent.tools.register_default_tools``: the
+    Same mechanics as ``dhc.tooling.framework_tools.register_default_tools``: the
     runtime's namespace builder (``_build_namespace``) is wrapped so each
     agent's turn namespace gains the store tools bound to that agent. The
     framework core is untouched: it keeps its slim base namespace; the store

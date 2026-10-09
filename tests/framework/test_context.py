@@ -1,7 +1,7 @@
 """Tests for the context-trigger seam (INFO-021).
 
 Covers:
-* :mod:`dhc.agent.context` — the digest observe/trim logic (the ONLY real
+* :mod:`dhc.framework.context` — the digest observe/trim logic (the ONLY real
   pruning: keep the last 50 entries, drop older);
 * the fabrication kit's ``observe`` delegate (identical semantics);
 * the dormant :class:`~dhc.llm.llm.ContextRotDetector` wiring chain:
@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dhc.agent.context import (  # noqa: E402
+from dhc.framework.context import (  # noqa: E402
     DIGEST_KEEP,
     make_observe,
     observe_digest,
@@ -276,7 +276,7 @@ class TestDetectorWiring:
 def _register_agent(rt, agent_id="a1", requirement="r"):
     """Register an agent on the runtime WITHOUT starting a worker thread
     (the same bookkeeping spawn does, minus the thread)."""
-    from dhc.agent.agent import Agent, AgentHandle
+    from dhc.framework.agent import Agent, AgentHandle
 
     agent = Agent(
         id=agent_id,

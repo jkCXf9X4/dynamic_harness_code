@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from ..agent.context import make_observe as _context_make_observe
+from ..framework.context import make_observe as _context_make_observe
 from .driver import default_build_prompt, driver_from_settings
 from ..data.models import AgentStatus, EventKind
 
@@ -183,7 +183,7 @@ def make_observe(
 ) -> Callable[[], list]:
     """Consume happenings: completion callbacks + the event-stream digest.
 
-    Thin delegate to :mod:`dhc.agent.context` (the context-trigger seam);
+    Thin delegate to :mod:`dhc.framework.context` (the context-trigger seam);
     identical semantics: drain, extend the workspace digest, trim to the
     last 50 entries.
     """
@@ -256,7 +256,7 @@ def make_checkpoint(
     This is the **agent's own** checkpoint mechanism (decision 0012, H-06):
     in-workspace, in-memory, ordinary data the agent reads and writes freely.
     It is distinct from the operator's on-disk ``CheckpointStore``
-    (``dhc.agent.checkpoint``), which is the operator's resumability
+    (``dhc.ui.checkpoint``), which is the operator's resumability
     mechanism surfaced via the terminal's ``/resume`` and is deliberately
     outside the agent's context. The two are independent; see
     ``decisions/0012-h06-checkpoint-split.md``.
@@ -349,7 +349,7 @@ def make_ensure_fabrication(
     citizens when anything was re-seeded.
 
     The self-guard case: the pump calls this kit-owned closure (via
-    :mod:`dhc.agent.integrity`), never the workspace copy, so a broken
+    :mod:`dhc.framework.integrity`), never the workspace copy, so a broken
     workspace ``ensure_fabrication`` is itself re-seedable without recursion
     or dependence on the broken copy.
     """

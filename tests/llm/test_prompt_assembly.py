@@ -281,7 +281,7 @@ def _register_agent(rt, agent_id="a1", requirement="r"):
     """Register an agent on the runtime WITHOUT starting a worker thread."""
     import threading
 
-    from dhc.agent.agent import Agent, AgentHandle
+    from dhc.framework.agent import Agent, AgentHandle
 
     agent = Agent(
         id=agent_id,

@@ -1,5 +1,9 @@
 """Per-agent checkpoint persistence (peripheral wrapper).
 
+Decision 0016 home: the operator's side (``dhc.ui``) — the operator's
+resumability mechanism, next to the operator's review files
+(:mod:`dhc.ui.state`).
+
 Mirrors the reference project's ``core/checkpoint.py`` pattern: an
 ``AgentCheckpoint`` pydantic model persisted as
 ``<checkpoint_root>/<agent_id>.json`` via ``model_dump_json(indent=2)``.

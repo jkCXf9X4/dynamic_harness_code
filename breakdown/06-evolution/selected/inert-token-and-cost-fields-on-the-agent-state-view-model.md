@@ -15,12 +15,12 @@ and a task contract before code changes begin (change pipeline).
 
 ## Why — pain and evidence
 
-- **The fields exist but are never written.** `src/dhc/agent/state.py`
+- **The fields exist but are never written.** `src/dhc/ui/state.py`
   (`AgentNode`, lines 78–95) carries `tokens`, `messages`, `context_tokens`,
   `prompt_tokens`, `completion_tokens`, `cached_tokens`, `cost_usd`, and
   `cum_cost_usd` — all defaulting to zero. The scoping brief (run
   `261008_105638_6a18`, §2) and decision record `0007` (agent module
-  separation) list them as inert: no code path in `src/dhc/agent/` or
+  separation) list them as inert: no code path in `src/dhc/framework/` or
   `src/dhc/wiring.py` ever assigns them.
 - **The data already exists at the driver boundary.** `LLMResponse`
   (`src/dhc/llm/llm.py:93–100`) carries `usage` (a dict with
@@ -54,8 +54,8 @@ and a task contract before code changes begin (change pipeline).
 
 | Module | Change |
 |---|---|
-| `src/dhc/agent/loop.py` (or the `decide` seam in `fabrication.py`) | Accumulate `LLMResponse.usage`/`cost_usd` into the agent's state on each driver call. |
-| `src/dhc/agent/state.py` | `AgentNode` reads the accumulated values (no new fields needed — the fields already exist). |
+| `src/dhc/framework/loop.py` (or the `decide` seam in `fabrication.py`) | Accumulate `LLMResponse.usage`/`cost_usd` into the agent's state on each driver call. |
+| `src/dhc/ui/state.py` | `AgentNode` reads the accumulated values (no new fields needed — the fields already exist). |
 | `tests/` (state/loop tests) | A usage-propagation test: a call with usage populates the node; a call without usage leaves it zero. |
 
 ## Containment

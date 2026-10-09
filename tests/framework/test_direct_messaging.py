@@ -14,8 +14,8 @@ import threading
 
 import pytest
 
-from dhc.agent.agent import Agent
-from dhc.agent.runtime import Runtime
+from dhc.framework.agent import Agent
+from dhc.framework.runtime import Runtime
 from dhc.data.models import EventKind
 from dhc.errors import ChannelError
 

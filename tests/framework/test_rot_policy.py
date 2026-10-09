@@ -23,7 +23,7 @@ import threading
 
 import pytest
 
-from dhc.agent.rot import (
+from dhc.framework.rot import (
     DEFAULT_ROT_ACTION,
     DEFAULT_ROT_THRESHOLD,
     agent_rot_policy,
@@ -545,7 +545,7 @@ def test_llm_driver_stashes_rot_report_on_agent(tmp_path, monkeypatch):
 def _register_agent(rt, agent_id="a1", requirement="r"):
     """Register an agent on the runtime WITHOUT starting a worker thread
     (the same bookkeeping spawn does, minus the thread)."""
-    from dhc.agent.agent import Agent, AgentHandle
+    from dhc.framework.agent import Agent, AgentHandle
 
     agent = Agent(
         id=agent_id,

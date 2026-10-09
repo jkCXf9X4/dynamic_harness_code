@@ -1,6 +1,6 @@
 """Immutable, content-addressed artifact store and boundary event log.
 
-Operator tooling (decision 0014): the framework core (``dhc.agent``) knows
+Operator tooling (decision 0014): the framework core (``dhc.framework``) knows
 artifacts only as opaque ids and the ``artifact_published`` event kind —
 everything that *persists* them lives here.
 

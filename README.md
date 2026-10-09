@@ -69,24 +69,33 @@ tooling exposed (`runtime.messenger`, `runtime.rooms`, `runtime.escalations`,
 
 ## Module map
 
+The layout IS the architecture (decision 0016): `framework/` runs agents and
+enforces guarantees (zero tools inside), `tooling/` is everything installed
+into agent REPLs beyond the core actions, `ui/` is the operator's side, and
+`wiring.py` is the only meeting point.
+
 | Module | Owns |
 | --- | --- |
-| `models.py` | `Artifact`, `Result`, `Event`, `Completion`, `ToolOutput`, `Room`, lifecycle states |
+| `data/models.py` | `Artifact`, `Result`, `Event`, `Completion`, `ToolOutput`, `Room`, lifecycle states |
 | `errors.py` | the `DhcError` hierarchy |
-| `config.py` | `Settings` (env + `.env`), `get_settings()` |
-| `tooling/artifact_store.py` | content-addressed `ArtifactStore`, `BoundaryEventLog` (INFO-049) — operator tooling (0014) |
+| `data/config.py` | `Settings` (env + `.env`), `get_settings()` |
+| `framework/runtime.py` | `Runtime`: spawn/await/poll/cancel/status/result/send, parent liveness, worker loop |
+| `framework/repl.py` | per-agent persistent `ReplEngine` (INFO-050) |
+| `framework/event_stream.py` | `EventStream`, `EventBus`, `CompletionDispatcher` (INFO-046/047/048) |
+| `framework/agent.py` | the in-code surface: `Agent`, `AgentHandle`, `bash`, `send` (the directed-message primitive, 0015) |
+| `framework/loop.py` | the worker pump: driver → turn → settle with fabrication integrity |
+| `llm/llm.py` | `LLMClient`, `MockLLM`, `ContextRotDetector` (INFO-020/021) |
+| `llm/driver.py` | `LLMDriver`, `MockDriver`, `driver_from_settings` — the pluggable brain |
+| `tooling/framework_tools.py` | the framework-surface tools: `list_tools`, `events` (moved out of the framework, 0016) |
+| `tooling/artifact_store.py` | content-addressed `ArtifactStore`, `BoundaryEventLog` (INFO-049) — composed tooling (0014) |
 | `tooling/artifact_tools.py` | the store's REPL tools: `publish`, `read_artifact`, `archive`, `list_artifacts` |
-| `repl.py` | per-agent persistent `ReplEngine` (INFO-050) |
-| `event_stream.py` | `EventStream`, `EventBus`, `CompletionDispatcher` (INFO-046/047/048) |
-| `agent.py` | the in-code surface: `Agent`, `AgentHandle`, `bash`, `send` (the directed-message primitive, 0015) |
-| `runtime.py` | `Runtime`: spawn/await/poll/cancel/status/result/send, parent liveness, worker loop |
-| `llm.py` | `LLMClient`, `MockLLM`, `ContextRotDetector` (INFO-020/021) |
-| `driver.py` | `LLMDriver`, `MockDriver`, `driver_from_settings` — the pluggable brain |
 | `tooling/channels.py` | `Messenger`, `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel` — communication policies over the core `send` primitive (0015) |
 | `tooling/channel_tools.py` | the channels' REPL tools: `room`, `messenger`, `escalate`, `ask_operator`, `post`, `channel_read` |
-| `operator.py` | root door, chat loop, mid-turn steering, operator questions |
+| `ui/operator.py` | root door, chat loop, mid-turn steering, operator questions |
+| `ui/state.py` | the operator's review files: tree, stats, events (0016) |
+| `ui/checkpoint.py` | the operator's resumability store, surfaced via `/resume` (0012) |
 | `cli.py` | minimal chat-only TUI (INFO-028) |
-| `wiring.py` | `build_runtime` — binds the real modules into one runtime |
+| `wiring.py` | `build_runtime` — the composition root, the only framework+tooling meeting point |
 
 ## Running the tests
 

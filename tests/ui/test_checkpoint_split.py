@@ -8,7 +8,7 @@ split, not a vision violation:
   agent reads and writes. This is the agent's side of the control split, and
   it is what the vision's A3 surface ("context and history as ordinary data")
   promises.
-* **On-disk ``CheckpointStore``** — ``src/dhc/agent/checkpoint.py``, surfaced
+* **On-disk ``CheckpointStore``** — ``src/dhc/ui/checkpoint.py``, surfaced
   to the operator via ``/resume`` in the terminal. Operator-only, durable,
   out-of-process. This is the operator's side of the control split.
 
@@ -27,8 +27,8 @@ These tests pin that split so it cannot silently drift:
 import threading
 from pathlib import Path
 
-from dhc.agent.agent import Agent, AgentHandle
-from dhc.agent.checkpoint import AgentCheckpoint, CheckpointStore
+from dhc.framework.agent import Agent, AgentHandle
+from dhc.ui.checkpoint import AgentCheckpoint, CheckpointStore
 from dhc.llm.fabrication import fabrication_kit
 from dhc.ui.terminal import Terminal
 from dhc.wiring import build_runtime

@@ -16,9 +16,9 @@ from dhc.tooling.channels import (
     RoomManager,
 )
 from dhc.tooling.channel_tools import register_channel_tools
-from dhc.agent.agent import Agent
-from dhc.agent.event_stream import CompletionDispatcher, EventBus
-from dhc.agent.runtime import Runtime
+from dhc.framework.agent import Agent
+from dhc.framework.event_stream import CompletionDispatcher, EventBus
+from dhc.framework.runtime import Runtime
 from dhc.data.models import EventKind
 from dhc.wiring import _WiredBus
 

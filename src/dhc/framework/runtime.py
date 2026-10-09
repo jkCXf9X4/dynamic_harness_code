@@ -3,9 +3,9 @@
 Owns the agent registry, thread-per-agent placement (INFO-038), completion
 dispatch (at-most-once, INFO-046), parent liveness (INFO-014), and
 cancellation (INFO-034/040). The worker loop (driver -> turn -> settle) and
-the pumped ``__runner`` path live in :mod:`dhc.agent.loop`; the ceiling-caps
-watchdog predicate lives in :mod:`dhc.agent.caps`; the fabrication
-ensure/re-seed helper lives in :mod:`dhc.agent.integrity`. This module keeps
+the pumped ``__runner`` path live in :mod:`dhc.framework.loop`; the ceiling-caps
+watchdog predicate lives in :mod:`dhc.framework.caps`; the fabrication
+ensure/re-seed helper lives in :mod:`dhc.framework.integrity`. This module keeps
 the runtime state (the 17 dicts/flags + the one RLock), settlement, the
 namespace build, the public supervision API, and thin method wrappers over
 every moved name — the re-export seam — so existing imports (including
@@ -286,7 +286,7 @@ class Runtime:
             thread.start()
         return self._handles[agent_id]
 
-    # -- worker loop (moved to dhc.agent.loop; thin wrappers) -----------------
+    # -- worker loop (moved to dhc.framework.loop; thin wrappers) -----------------
 
     def _supports_pump(self) -> bool:
         """True when the engine can drive a resumable ``__runner`` generator."""
@@ -298,18 +298,18 @@ class Runtime:
 
     def _pump_agent(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
         """Drive *agent_id* to settlement (IMP-001 Step 3). Moved to
-        :func:`dhc.agent.loop.pump_agent`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.loop.pump_agent`; thin wrapper (re-export seam)."""
         return _loop.pump_agent(self, agent_id, driver)
 
     def _legacy_loop(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
         """The legacy turn loop (non-pump engines only). Moved to
-        :func:`dhc.agent.loop.legacy_loop`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.loop.legacy_loop`; thin wrapper (re-export seam)."""
         return _loop.legacy_loop(self, agent_id, driver)
 
     def _pump_loop(self, agent_id: str, driver: Optional[Callable[[Agent], Optional[str]]]) -> None:
         """The ONE loop for the real runtime: drive the agent's ``__runner``
         one yield-window per step under the four hard gates. Moved to
-        :func:`dhc.agent.loop.pump_loop`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.loop.pump_loop`; thin wrapper (re-export seam)."""
         return _loop.pump_loop(self, agent_id, driver)
 
     def _install_runner(
@@ -320,22 +320,22 @@ class Runtime:
         source: Optional[str] = None,
     ) -> str:
         """Compile and install the agent's ``__runner`` generator. Moved to
-        :func:`dhc.agent.loop.install_runner`; thin wrapper (re-export seam)."""
+        :func:`dhc.framework.loop.install_runner`; thin wrapper (re-export seam)."""
         return _loop.install_runner(engine, agent_id, kit, source)
 
     def _service_await(self, agent_id: str, engine: Any, handle: Any) -> float:
         """Park the runner until *handle*'s agent settles. Moved to
-        :func:`dhc.agent.loop.service_await`; thin wrapper (re-export seam).
+        :func:`dhc.framework.loop.service_await`; thin wrapper (re-export seam).
         Returns the parked seconds (credited against the wall clock, 0008)."""
         return _loop.service_await(self, agent_id, engine, handle)
 
     def _service_sleep(self, agent_id: str, engine: Any, seconds: float) -> float:
         """Park the runner for *seconds* (stop-flag aware). Moved to
-        :func:`dhc.agent.loop.service_sleep`; thin wrapper (re-export seam).
+        :func:`dhc.framework.loop.service_sleep`; thin wrapper (re-export seam).
         Returns the parked seconds (credited against the wall clock, 0008)."""
         return _loop.service_sleep(self, agent_id, engine, seconds)
 
-    # -- ceiling caps (predicate moved to dhc.agent.caps) --------------------
+    # -- ceiling caps (predicate moved to dhc.framework.caps) --------------------
 
     def _cap(self, name: str, default: Any) -> Any:
         """Read a cap from settings None-safely (safety config first)."""
@@ -438,7 +438,7 @@ class Runtime:
         CORE-ONLY names (the architectural goal: core = runtime + eventbus +
         the directed-message primitive, 0015). The artifact store and the
         communication channels are REPL tools composed in by the registration
-        functions (``dhc.agent.tools``, ``dhc.tooling`` — via wiring.py), not
+        functions (``dhc.tooling.framework_tools``, ``dhc.tooling`` — via wiring.py), not
         part of the core namespace. ``send`` is the one communication name
         here: direct messaging is the framework primitive every agent gets,
         even in a bare runtime with no tooling installed.

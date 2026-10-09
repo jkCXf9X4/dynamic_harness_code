@@ -1,6 +1,6 @@
 """Adapters: bridge the operator's artifact store onto the runtime seams.
 
-Operator tooling (decision 0014): the framework core (``dhc.agent``) knows
+Operator tooling (decision 0014): the framework core (``dhc.framework``) knows
 artifacts only as opaque ids and the ``artifact_published`` event kind. These
 adapters live on the tooling side of that line and are composed in by
 ``wiring.build_runtime``:

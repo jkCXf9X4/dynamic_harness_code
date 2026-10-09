@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from dhc.agent.agent import Agent
+from dhc.framework.agent import Agent
 from dhc.llm.driver import MockDriver
-from dhc.agent.state import AgentNode, StateWriter, build_agent_tree
+from dhc.ui.state import AgentNode, StateWriter, build_agent_tree
 from dhc.ui import terminal as terminal_module
 from dhc.ui.terminal import Terminal, main, render_text_tree
 from dhc.wiring import build_runtime

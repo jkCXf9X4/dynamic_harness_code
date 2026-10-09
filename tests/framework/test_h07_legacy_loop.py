@@ -10,7 +10,7 @@ cannot silently change.
 
 from __future__ import annotations
 
-from dhc.agent.runtime import Runtime
+from dhc.framework.runtime import Runtime
 from dhc.data.models import AgentStatus, EventKind
 
 # The pump's engine contract (IMP-001 Step 1): the resumable-runner
@@ -87,7 +87,7 @@ def test_h07_memory_engine_lacks_pump_primitives():
     """The mechanical reason the legacy path must stay: ``_MemoryEngine``
     provides none of the eight primitives the pump drives an agent
     through."""
-    from dhc.agent.runtime import _MemoryEngine
+    from dhc.framework.runtime import _MemoryEngine
 
     engine = _MemoryEngine()
     missing = [name for name in PUMP_PRIMITIVES if not hasattr(engine, name)]
@@ -100,7 +100,7 @@ def test_h07_memory_engine_lacks_pump_primitives():
 def test_h07_repl_engine_provides_pump_primitives():
     """The contrast: ``ReplEngine`` provides all eight, so the pump's
     engine contract is real, not vacuous."""
-    from dhc.agent.repl import ReplEngine
+    from dhc.framework.repl import ReplEngine
 
     engine = ReplEngine()
     missing = [name for name in PUMP_PRIMITIVES if not hasattr(engine, name)]

@@ -12,7 +12,7 @@ The four hard gates (D2) are enforced on the pump path exactly as before:
 - settlement at-most-once (``Runtime._settle`` / CompletionLog — stays in
   ``runtime.py``),
 - crash containment (per-step error/timeout classification),
-- ceiling caps (``Runtime._caps_watchdog`` -> :mod:`dhc.agent.caps`),
+- ceiling caps (``Runtime._caps_watchdog`` -> :mod:`dhc.framework.caps`),
 - cancellation grace (stop-flag check between steps).
 
 Shape: module-level functions taking the ``Runtime`` instance as first

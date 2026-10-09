@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import json
 
-from dhc.agent.agent import Agent
-from dhc.agent.state import (
+from dhc.framework.agent import Agent
+from dhc.ui.state import (
     StateWriter,
     build_agent_tree,
     build_stats,
