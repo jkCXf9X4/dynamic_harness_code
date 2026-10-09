@@ -13,6 +13,7 @@ status: current
 - The escalation travels upstream only: the parent re-allocates by re-decomposing, relaxing the criteria, or retrying with different context (`INFO-004`).
 - Siblings are not notified; the failed result is indistinguishable in shape from any other result, only in content (`INFO-005`).
 - The child stops at the point of failure and stays contained (`INFO-005`).
+- Boundary (decision 0015): the escalation routing policy is operator tooling composed over the core directed-message primitive — its event is receiver-addressed (to the parent), so the parent sees it on its own stream whether or not the escalation channel is installed.
 
 ## Owns
 - The upstream control channel from child to parent for renegotiation.

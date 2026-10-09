@@ -1,13 +1,15 @@
-"""The tools layer: communication channels and events as REPL tools.
+"""The framework tools layer: introspection and event reads as REPL tools.
 
-The architectural goal (refactor scoping brief §c6/§c8): the CORE is only
-``dhc/runtime.py`` + ``dhc/event_stream.py``. The artifact store and the
-communication channels are *not* core collaborators — they are REPL-executed
-Python tools: namespace callables developed separately from the core and
-installed by registration functions. The channel and events tools live here
-(framework-side); the artifact store tools (publish, read_artifact, archive,
-list_artifacts) live in :mod:`dhc.tooling.artifact_tools` — the store itself
-is operator tooling, not framework (decision 0014).
+The architectural goal: the CORE is ``dhc/runtime.py`` + ``dhc/event_stream.py``
+plus the directed-message primitive (``Agent.send`` / ``Runtime.send``,
+decision 0015). This framework-side tools layer installs only what wraps a
+core surface: ``list_tools`` (introspection of the installed tools) and
+``events`` (the agent's own consume-once event read). Channel tools
+(``room``, ``messenger``, ``escalate``, ``ask_operator``, ``post``,
+``channel_read``) live in :mod:`dhc.tooling.channel_tools` — channels are
+operator tooling composed over the core send primitive (decision 0015) — and
+the artifact store tools (``publish``, ``read_artifact``, ``archive``,
+``list_artifacts``) live in :mod:`dhc.tooling.artifact_tools` (decision 0014).
 
 Tools receive a lightweight :class:`ToolContext` (agent_id + duck-typed
 collaborators), never the :class:`~dhc.agent.Agent` itself — mirroring the
@@ -18,11 +20,8 @@ base namespace contains only core names; everything else is composed in by
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
-
-from ..errors import ChannelError
-from ..data.models import Event, Message, Room
+from dataclasses import dataclass
+from typing import Any, Callable
 
 
 # --------------------------------------------------------------------------- #
@@ -40,40 +39,15 @@ class ToolContext:
     * ``runtime`` — anything exposing the supervision surface the tool needs
       (e.g. ``children_of``, ``get``); may be ``None``.
     * ``bus`` — anything with ``publish(event)`` (the event bus).
-    * ``channels`` — a dict of named channel facades: ``messenger``,
-      ``rooms``, ``escalations``, ``questions``.
 
-    The artifact store deliberately has NO slot here (decision 0014): the
-    store tools live in ``dhc.tooling.artifact_tools`` with their own
-    context.
+    The artifact store and the communication channels deliberately have no
+    slot here (decisions 0014/0015): their tools live in ``dhc.tooling``
+    with their own contexts.
     """
 
     agent_id: str
     runtime: Any = None
     bus: Any = None
-    channels: dict[str, Any] = field(default_factory=dict)
-
-    # -- convenience accessors ----------------------------------------------
-
-    @property
-    def messenger(self) -> Any:
-        """The bound messenger facade (or ``None`` when not wired)."""
-        return self.channels.get("messenger")
-
-    @property
-    def rooms(self) -> Any:
-        """The room manager (or ``None`` when not wired)."""
-        return self.channels.get("rooms")
-
-    @property
-    def escalations(self) -> Any:
-        """The escalation channel (or ``None`` when not wired)."""
-        return self.channels.get("escalations")
-
-    @property
-    def questions(self) -> Any:
-        """The operator-question channel (or ``None`` when not wired)."""
-        return self.channels.get("questions")
 
 
 # --------------------------------------------------------------------------- #
@@ -81,56 +55,14 @@ class ToolContext:
 # --------------------------------------------------------------------------- #
 
 
-def _room(ctx: ToolContext, name: str) -> Room:
-    """Join (creating if needed) the shared room *name*; return it."""
-    if ctx.rooms is None:
-        raise RuntimeError("no room manager wired into the tools layer")
-    return ctx.rooms.join(ctx.agent_id, name)
-
-
-def _post(ctx: ToolContext, room_name: str, body: str) -> Message:
-    """Post *body* to *room_name* as the calling agent."""
-    if ctx.rooms is None:
-        raise RuntimeError("no room manager wired into the tools layer")
-    return ctx.rooms.post(ctx.agent_id, room_name, body)
-
-
-def _channel_read(ctx: ToolContext, topic: str) -> list[Message]:
-    """Return the room's traffic in post order (empty for unknown rooms)."""
-    if ctx.rooms is None:
-        raise RuntimeError("no room manager wired into the tools layer")
-    return ctx.rooms.messages(topic)
-
-
-def _escalate(ctx: ToolContext, requirement: str, reason: str) -> Event:
-    """Escalate an unreachable *requirement* up the parent chain."""
-    if ctx.escalations is None:
-        raise RuntimeError("no escalation channel wired into the tools layer")
-    parent_id = getattr(ctx.runtime, "parent_id", None)
-    if parent_id is None and ctx.runtime is not None:
-        agent = ctx.runtime.get(ctx.agent_id)
-        parent_id = getattr(agent, "parent_id", None)
-    if parent_id is None:
-        raise ChannelError("root agent has no parent to escalate to")
-    return ctx.escalations.escalate(
-        ctx.agent_id, parent_id, requirement, reason
-    )
-
-
-def _ask_operator(ctx: ToolContext, question: str) -> Event:
-    """Ask the operator *question* as the calling agent."""
-    if ctx.questions is None:
-        raise RuntimeError("no operator-question channel wired into the tools layer")
-    return ctx.questions.ask(ctx.agent_id, question)
-
-
 def _list_tools(ctx: ToolContext) -> list[str]:
     """Return the names of the installed tools.
 
     Reads the runtime's accumulated ``_installed_tool_names`` — the union of
-    the names every registration function (this one and
-    ``dhc.tooling.register_artifact_tools``) has contributed — so a runtime
-    without the store tooling does not advertise ``publish``.
+    the names every registration function (this one,
+    ``dhc.tooling.register_artifact_tools``, and
+    ``dhc.tooling.register_channel_tools``) has contributed — so a runtime
+    without the store or channel tooling does not advertise their tools.
     """
     names = getattr(ctx.runtime, "_installed_tool_names", None)
     if names is None:
@@ -160,17 +92,12 @@ def _events(ctx: ToolContext) -> list:
 # --------------------------------------------------------------------------- #
 
 #: The canonical tool names installed by :func:`register_default_tools`.
-#: (The four artifact store tools are a separate set, installed by
-#: ``dhc.tooling.register_artifact_tools``; ``list_tools`` reports the
-#: union of whatever is actually installed on the runtime.)
+#: (The four artifact store tools come from
+#: ``dhc.tooling.register_artifact_tools``; the six channel tools from
+#: ``dhc.tooling.register_channel_tools``; ``list_tools`` reports the union
+#: of whatever is actually installed on the runtime.)
 _TOOL_NAMES: frozenset[str] = frozenset(
     {
-        "room",
-        "messenger",
-        "escalate",
-        "ask_operator",
-        "post",
-        "channel_read",
         "list_tools",
         "events",
     }
@@ -178,21 +105,8 @@ _TOOL_NAMES: frozenset[str] = frozenset(
 
 
 def _bind(ctx: ToolContext) -> dict[str, Callable[..., Any]]:
-    """Build the namespace callables bound to *ctx* (one per tool name).
-
-    ``messenger`` is an object (a per-agent facade with methods), not a
-    callable — it is installed as a namespace value like the reference's
-    tool objects.
-    """
+    """Build the namespace callables bound to *ctx* (one per tool name)."""
     return {
-        "room": lambda name: _room(ctx, name),
-        "messenger": ctx.messenger,
-        "escalate": lambda requirement, reason: _escalate(
-            ctx, requirement, reason
-        ),
-        "ask_operator": lambda question: _ask_operator(ctx, question),
-        "post": lambda room_name, body: _post(ctx, room_name, body),
-        "channel_read": lambda topic: _channel_read(ctx, topic),
         "list_tools": lambda: _list_tools(ctx),
         "events": lambda: _events(ctx),
     }
@@ -201,25 +115,20 @@ def _bind(ctx: ToolContext) -> dict[str, Callable[..., Any]]:
 def register_default_tools(
     runtime: Any,
     bus: Any = None,
-    channels: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Install the default tools as namespace callables on *runtime*.
+    """Install the framework tools as namespace callables on *runtime*.
 
     The runtime's namespace builder (``_build_namespace``) is wrapped so each
     agent's turn namespace gains the tools bound to that agent's
     :class:`ToolContext`. The core runtime itself is untouched: it keeps its
-    slim base namespace; the tools are composed in here.
+    slim base namespace (which now includes the directed-message primitive
+    ``send``, decision 0015); the tools are composed in here.
 
-    The artifact store tools are NOT installed here (decision 0014) — they
-    come from ``dhc.tooling.register_artifact_tools``.
+    The artifact store tools and the channel tools are NOT installed here
+    (decisions 0014/0015) — they come from ``dhc.tooling``.
 
-    *bus* is duck-typed (``publish(event)``); *channels* maps names to
-    channel facades (``messenger``, ``rooms``, ``escalations``, ``questions``).
-    A channel value may be a plain object or a callable ``(agent_id) -> bound
-    facade`` — the callable form is used for per-agent facades (e.g. the
-    messenger bound to the calling agent).
+    *bus* is duck-typed (``publish(event)``).
     """
-    channels = dict(channels or {})
     original = getattr(runtime, "_build_namespace", None)
     names = set(getattr(runtime, "_installed_tool_names", ()))
     names.update(_TOOL_NAMES)
@@ -227,14 +136,10 @@ def register_default_tools(
 
     def build(agent: Any) -> dict:
         ns = original(agent) if original is not None else {}
-        resolved: dict[str, Any] = {}
-        for name, channel in channels.items():
-            resolved[name] = channel(agent.id) if callable(channel) else channel
         ctx = ToolContext(
             agent_id=agent.id,
             runtime=runtime,
             bus=bus,
-            channels=resolved,
         )
         ns.update(_bind(ctx))
         return ns

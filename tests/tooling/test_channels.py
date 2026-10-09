@@ -1,15 +1,18 @@
-"""Tests for dhc.communication: Messenger, RoomManager, EscalationChannel,
+"""Tests for dhc.tooling.channels: Messenger, RoomManager, EscalationChannel,
 OperatorQuestionChannel.
 
-Covers INFO-011/015/016/023 semantics: direct FIFO messaging with unknown-
-recipient ChannelError, shared rooms with membership enforcement and traffic
+Decision 0015: direct messaging is a framework primitive (``Runtime.send`` —
+receiver-addressed ``message_sent`` events on the recipient's stream); these
+channels are tooling policies over that primitive. Covers INFO-011/015/016/023
+semantics: the Messenger inbox/read-state *view* over receiver-addressed
+message events, shared rooms with membership enforcement and traffic
 persistence, upstream escalation with by-reference payload and ack, and
 operator questions with causal_id-linked answers.
 """
 
 import pytest
 
-from dhc.ui.communication import (
+from dhc.tooling.channels import (
     EscalationChannel,
     Messenger,
     OperatorQuestionChannel,
@@ -48,27 +51,27 @@ class _Sink:
         return iter(self.records)
 
 
-class _Registry:
-    def __init__(self, ids) -> None:
-        self._ids = set(ids)
-
-    def __contains__(self, agent_id: str) -> bool:
-        return agent_id in self._ids
+def _message_event(sender_id: str, recipient_id: str, body: str, message_id: str = "m1") -> Event:
+    """A receiver-addressed message event, as ``Runtime.send`` emits it (0015)."""
+    return Event(
+        kind=EventKind.message_sent,
+        agent_id=recipient_id,
+        payload={"sender_id": sender_id, "message_id": message_id, "body": body},
+    )
 
 
 # --------------------------------------------------------------------------- #
-# Messenger — INFO-015
+# Messenger — INFO-015 (a view over the core message events)
 # --------------------------------------------------------------------------- #
 
 
-def test_messenger_send_inbox_read_unread_fifo():
+def test_messenger_view_inbox_read_unread_fifo():
     bus = _FakeBus()
-    registry = _Registry({"alice", "bob"})
-    m = Messenger(bus, registry)
+    m = Messenger(bus)
 
-    m1 = m.send("alice", "bob", "first")
-    m2 = m.send("alice", "bob", "second")
-    m3 = m.send("bob", "alice", "reply")
+    bus.publish(_message_event("alice", "bob", "first", "m1"))
+    bus.publish(_message_event("alice", "bob", "second", "m2"))
+    bus.publish(_message_event("bob", "alice", "reply", "m3"))
 
     # FIFO order per recipient.
     assert [msg.body for msg in m.inbox("bob")] == ["first", "second"]
@@ -79,43 +82,46 @@ def test_messenger_send_inbox_read_unread_fifo():
     assert m.unread_count("alice") == 1
 
     # read() marks one message read and returns it.
-    first_id = m.inbox("bob")[0].body  # body is not the id; find by content below
-    # Locate the message id via the event payload.
-    sent_events = [e for e in bus.published if e.kind == EventKind.message_sent]
-    assert len(sent_events) == 3
-    first_event = sent_events[0]
-    assert first_event.payload["recipient_id"] == "bob"
-    first_message_id = first_event.payload["message_id"]
-
-    got = m.read("bob", first_message_id)
+    got = m.read("bob", "m1")
     assert got is not None and got.body == "first"
     assert m.unread_count("bob") == 1
 
     # Reading an unknown id returns None.
     assert m.read("bob", "nope") is None
 
-    # Events carry the correct kind.
-    assert all(e.kind == EventKind.message_sent for e in sent_events)
+    # The rebuilt Messages carry sender/recipient/body from the event.
+    reply = m.inbox("alice")[0]
+    assert isinstance(reply, Message)
+    assert reply.sender_id == "bob"
+    assert reply.recipient_id == "alice"
+    assert reply.body == "reply"
 
 
-def test_messenger_send_unknown_recipient_raises():
+def test_messenger_ignores_non_message_events():
     bus = _FakeBus()
-    registry = _Registry({"alice"})
-    m = Messenger(bus, registry)
-    with pytest.raises(ChannelError):
-        m.send("alice", "ghost", "hello")
-    assert bus.published == []
+    m = Messenger(bus)
+    bus.publish(Event(kind=EventKind.room_message, agent_id="bob", payload={}))
+    bus.publish(Event(kind=EventKind.escalation, agent_id="bob", payload={}))
+    assert m.inbox("bob") == []
+    assert m.unread_count("bob") == 0
 
 
-def test_messenger_sink_persists_messages():
-    sink = _Sink()
-    bus = _FakeBus()
-    registry = _Registry({"alice", "bob"})
-    m = Messenger(bus, registry, sink=sink)
-    m.send("alice", "bob", "durable")
-    assert len(sink.records) == 1
-    assert isinstance(sink.records[0], Message)
-    assert sink.records[0].body == "durable"
+def test_messenger_is_a_view_delivery_is_core():
+    """The Messenger is a VIEW over the stream (decision 0015): with no
+    Messenger, a receiver-addressed message event still lands on the
+    recipient's stream — the runtime's send delivers, not the channel."""
+    from dhc.agent.event_stream import EventBus
+
+    bus = EventBus()
+    bus.publish(_message_event("alice", "bob", "hi"))
+    events = bus.stream_for("bob").drain()
+    assert [e.kind for e in events] == [EventKind.message_sent]
+
+    # A Messenger constructed after the fact views live traffic only; the
+    # stream already delivered. The channel adds read-state sugar, not
+    # delivery.
+    m = Messenger(bus)
+    assert m.inbox("bob") == []
 
 
 # --------------------------------------------------------------------------- #

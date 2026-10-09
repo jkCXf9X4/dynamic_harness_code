@@ -39,9 +39,10 @@ _SURFACE_DOC = (
     "Available in the namespace: agent, publish(headline, summary, report), "
     "spawn(requirement, acceptance=(), driver=None, on_done=None), "
     "complete(headline, artifacts=()), fail(reason), cancel(reason), "
-    "status(), result(), tool(callable, *args), bash(cmd), room(name), "
+    "status(), result(), tool(callable, *args), bash(cmd), "
+    "send(recipient_id, body), room(name), "
     "await_(handle), poll(handle), children_of(handle), "
-    "messenger.send(recipient_id, body), escalate(reason), "
+    "messenger.send(recipient_id, body), escalate(requirement, reason), "
     "ask_operator(question)."
 )
 

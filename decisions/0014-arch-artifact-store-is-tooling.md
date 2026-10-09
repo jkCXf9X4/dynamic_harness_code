@@ -111,7 +111,14 @@ constructors must not expose a store parameter.
   (the core also runs without a real engine); what classifies a concern is
   whether the core carries its data opaquely to operator-side persistence
   (tooling) or the concern relays communication and execution semantics the
-  runtime owns (framework-side).
+  runtime owns (framework-side). **Superseded by `0015`:** the line was
+  drawn one level finer — the *relay primitive* (`Runtime.send`, a
+  receiver-addressed message event) is framework, and the channel *policies*
+  (rooms, escalation, operator questions, the inbox view) moved to
+  `dhc.tooling`, so the agent keeps full control of its communication.
+  The classifier above stands, sharpened: the core *interprets* the
+  message event (routes, caps, persists it), which is what makes the
+  primitive framework rather than carried tooling.
 - **Adjacent placement debt, named not moved:** two more operator-side
   persistence modules still live inside the framework package —
   `dhc.agent.state` (writes `agent_tree.json` / `stats.json` / `events.jsonl`

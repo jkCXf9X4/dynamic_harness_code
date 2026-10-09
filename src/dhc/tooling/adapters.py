@@ -9,9 +9,11 @@ adapters live on the tooling side of that line and are composed in by
   contract as the in-code ``publish(headline, summary, report)`` contract
   plus the progressive-disclosure read tiers (INFO-006).
 * :class:`BoundarySink` — the event-bus persist sink: translates runtime
-  events, direct messages, and room posts into the five boundary-log records
-  (INFO-049), linking settled/published records to their causal spawned
-  record via ``causal_id`` so the trail reconstructs as a DAG.
+  events and room posts into the five boundary-log records (INFO-049),
+  linking settled/published records to their causal spawned record via
+  ``causal_id`` so the trail reconstructs as a DAG. Direct messages arrive
+  as receiver-addressed ``message_sent`` events (decision 0015) — one event,
+  one record, no separate message sink.
 """
 
 from __future__ import annotations
@@ -38,13 +40,14 @@ class BoundarySink:
     """Adapt the bus/messenger sinks to the BoundaryEventLog (INFO-049).
 
     The bus calls ``sink.append(event)`` with a :class:`~dhc.models.Event`;
-    the Messenger calls ``sink.append(message)`` with a
-    :class:`~dhc.models.Message`; the RoomManager calls
-    ``sink.append(("room_message", room_name, message))``. This sink
-    translates each into a boundary-log record, mapping the runtime's event
-    kinds onto the five boundary kinds (spawned/settled/cancelled/published/
-    messaged) and linking settled/published records to their causal spawned
-    record via ``causal_id`` so the trail reconstructs as a DAG.
+    the RoomManager calls ``sink.append(("room_message", room_name,
+    message))``. This sink translates each into a boundary-log record,
+    mapping the runtime's event kinds onto the five boundary kinds
+    (spawned/settled/cancelled/published/messaged) and linking
+    settled/published records to their causal spawned record via
+    ``causal_id`` so the trail reconstructs as a DAG. Direct messages
+    (decision 0015) arrive as receiver-addressed ``message_sent`` events
+    on the bus itself — their body rides the event payload.
     """
 
     def __init__(self, log: BoundaryEventLog) -> None:
@@ -56,8 +59,6 @@ class BoundarySink:
     def append(self, obj: Any) -> None:
         if isinstance(obj, Event):
             self._append_event(obj)
-        elif isinstance(obj, Message):
-            self._append_message(obj)
         elif (
             isinstance(obj, tuple)
             and len(obj) == 3
@@ -82,18 +83,6 @@ class BoundarySink:
         with self._lock:
             self._log.append(
                 kind, event.agent_id, causal_id=causal_id, payload=event.payload
-            )
-
-    def _append_message(self, message: Message) -> None:
-        with self._lock:
-            self._log.append(
-                "messaged",
-                message.sender_id,
-                causal_id=None,
-                payload={
-                    "recipient_id": message.recipient_id,
-                    "body": message.body,
-                },
             )
 
     def _append_room(self, room_name: str, message: Message) -> None:

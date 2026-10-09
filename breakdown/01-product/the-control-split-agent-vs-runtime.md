@@ -2,7 +2,7 @@
 id: INFO-053
 type: info
 title: The control split — agent vs runtime
-summary: The product-level control boundary: everything reachable in an agent's workspace is the agent's to inspect and change; every mesh-survival guarantee is runtime behavior no agent code can edit or skip — and the orthogonal boundary of what the framework core knows (0014)
+summary: The product-level control boundary: everything reachable in an agent's workspace is the agent's to inspect and change; every mesh-survival guarantee is runtime behavior no agent code can edit or skip — and the orthogonal boundary of what the framework core knows (0014, 0015)
 date: 2026-10-08
 status: current
 ---
@@ -64,17 +64,24 @@ the agent too. It is about who enforces.
 ## A second boundary — what the core knows
 
 This split answers **who enforces** (agent vs runtime). It is orthogonal to a
-second boundary fixed by `0014`: **what the framework core carries**. The core
-owns only what the control loop needs to be correct — the guarantees listed
-under runtime control above. Everything that persists, observes, or renders
-state (the artifact store, the boundary log, operator viewers) is operator
-tooling: composed at the composition root, one-way dependent on the core, and
-known to the core only as opaque ids and event kinds. Removability is the
-entry condition for composition, not the verdict — the engine and the
-channels are removable and framework-side. The classifier is what the core
-does with the concern: data it only carries opaquely, so someone can persist,
-observe, or render it, is tooling; semantics it interprets, or communication
-the runtime itself relays (channels, escalation), is framework-side. The
+second boundary fixed by `0014` and refined by `0015`: **what the framework
+core carries**. The core owns only what the control loop needs to be correct
+— the guarantees listed under runtime control above — plus the
+directed-message primitive: `Runtime.send` emits a receiver-addressed
+`message_sent` event on the recipient's own stream, so a direct message is
+guaranteed to reach the recipient's awareness (digest, recent context,
+`events` tool) with no channel installed. Everything that persists,
+observes, or renders state (the artifact store, the boundary log, operator
+viewers) — and, since `0015`, every communication *policy* (rooms,
+escalation routing, operator questions, the inbox read-state view) — is
+operator tooling: composed at the composition root, one-way dependent on
+the core, and removable without changing what the core guarantees. The
+agent's communication beyond the primitive is its own composition choice.
+Removability is the entry condition for composition, not the verdict — the
+engine is removable and framework. The classifier is what the core does with
+the concern: data it only carries opaquely, so someone can persist, observe,
+or render it, is tooling; semantics it interprets — or the directed-message
+relay itself — is framework. The
 artifact contract is the worked example: its *vocabulary* — the
 content-addressed `Artifact` model, the disclosure tiers, the
 `artifact_published` event — is framework; its *medium*, the store holding

@@ -13,6 +13,7 @@ status: current
 - The channel is point-to-point: only the two parties see the traffic; no room and no third agent is involved.
 - A message can carry an artifact ID as its payload, so direct messaging composes with the artifact contract (`INFO-006`).
 - In a delegation tree this appears as a sibling handoff — the delegation-pattern instance of the same channel (`INFO-012`).
+- Boundary (decision 0015): the *primitive* is framework — `send(recipient_id, body)` is a core namespace action emitting a receiver-addressed `message_sent` event on the recipient's own stream, so a direct message reaches the recipient's awareness (digest, recent context, `events` tool) with no channel installed. The inbox read-state view (unread counts, read marking) is tooling composed on top; the agent chooses whether to use it.
 
 ## Owns
 - Direct agent-to-agent messaging: any agent can address any other by identity and exchange request-reply traffic without a parent mediating.

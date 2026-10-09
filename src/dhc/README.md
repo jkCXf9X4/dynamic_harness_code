@@ -17,11 +17,13 @@ src/dhc/
 ├── cli.py           # `dhc` console entry point — thin chat-only TUI (INFO-028)
 ├── wiring.py        # composition root: build_runtime() wires all real modules
 ├── errors.py        # cross-cutting error hierarchy (DhcError + subclasses)
-├── agent/           # agent-controlled execution core (store-unaware, 0014)
+├── agent/           # agent-controlled execution core (store/channel-unaware,
+│                    #   0014/0015); owns the directed-message primitive (send)
 ├── llm/             # LLM provider plumbing
 ├── ui/              # operator surface
 ├── data/            # schemas, config
-├── tooling/         # operator tooling: artifact store, boundary log, store tools (0014)
+├── tooling/         # operator tooling: artifact store, boundary log,
+│                    #   communication channels + their tools (0014/0015)
 └── benchmark/       # failable-verifier benchmark suite
 ```
 
@@ -29,10 +31,10 @@ src/dhc/
 
 | module | what it is |
 |---|---|
-| `runtime.py` | The runtime orchestrator: agent registry, thread-per-agent placement, worker loop (driver → turn → settle), at-most-once completion dispatch, cancellation |
+| `runtime.py` | The runtime orchestrator: agent registry, thread-per-agent placement, worker loop (driver → turn → settle), at-most-once completion dispatch, cancellation, and the directed-message primitive `send` (0015) |
 | `repl.py` | Per-agent persistent REPL engine (INFO-050): one private workspace per agent, serialized turns, crash containment |
 | `agent.py` | The in-code agent surface: `Agent` (what action blocks see as `agent`) and `AgentHandle` (the parent's await/poll/cancel handle) |
-| `tools.py` | The tools layer: communication channels + events exposed as REPL namespace callables (the store tools live in `tooling/`) |
+| `tools.py` | The framework tools layer: `list_tools` + `events` as REPL namespace callables (the channel and store tools live in `tooling/`) |
 | `state.py` | Run-overview persistence for manual review: `agent_tree.json`, `stats.json`, `agents.txt`, `events.jsonl` |
 | `checkpoint.py` | Per-agent checkpoint persistence (peripheral wrapper, best-effort save/restore) |
 | `event_stream.py` | Event stream, runtime-owned event bus, and completion dispatcher (persist-before-execute, at-most-once) |
@@ -51,8 +53,7 @@ src/dhc/
 | module | what it is |
 |---|---|
 | `terminal.py` | Prompt-only interactive terminal: one root agent across turns, `/`-commands, batch mode |
-| `operator.py` | The single human↔mesh door (INFO-017): chat loop, mid-turn steering, operator questions |
-| `communication.py` | Peer channels on the event bus: `Messenger`, `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel` |
+| `operator.py` | The single human↔mesh door (INFO-017): chat loop, mid-turn steering (via the core `send` primitive, 0015), operator questions |
 
 ### data/ — schemas, config
 
@@ -62,16 +63,21 @@ src/dhc/
 | `config.py` | Runtime configuration: env/`.env` `Settings` singleton + layered `harness.json` discovery (XDG → cwd → explicit) |
 | `trace.py` | Per-agent `trace.jsonl` persistence (peripheral wrapper) |
 
-### tooling/ — operator tooling (decision 0014)
+### tooling/ — operator tooling (decisions 0014/0015)
 
-The framework core is store-unaware: it knows artifacts only as opaque ids
-and the `artifact_published` event. Everything that persists them lives here,
-instantiated only by the composition root.
+The framework core is store-unaware and channel-unaware: it knows artifacts
+only as opaque ids and the `artifact_published` event, and communication
+only as the directed-message primitive (`Runtime.send` / `Agent.send`).
+Everything composed over those contracts lives here, instantiated only by
+the composition root — so the agent keeps full control of its communication
+patterns and persistence stack.
 
 | module | what it is |
 |---|---|
 | `artifact_store.py` | Immutable content-addressed artifact store + append-only boundary event log |
 | `artifact_tools.py` | The store's REPL tools (`publish`, `read_artifact`, `archive`, `list_artifacts`) + `register_artifact_tools` |
+| `channels.py` | The communication policies over the core `send` primitive: `Messenger` (inbox view), `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel` |
+| `channel_tools.py` | The channels' REPL tools (`room`, `messenger`, `escalate`, `ask_operator`, `post`, `channel_read`) + `register_channel_tools` |
 | `adapters.py` | `StoreAdapter` (`put` → `publish(h, s, r)` + read tiers) and `BoundarySink` (events → boundary log) |
 
 ### benchmark/ — evaluation

@@ -24,10 +24,12 @@ other wiring-level attributes.
 * :class:`~dhc.event_stream.CompletionDispatcher` — at-most-once (INFO-046)
 * :class:`~dhc.tooling.ArtifactStore` — content-addressed (INFO-006)
 * the communication channels (Messenger, RoomManager, EscalationChannel,
-  OperatorQuestionChannel) on the same bus
+  OperatorQuestionChannel) on the same bus — operator tooling (0015)
+  composed over the core directed-message primitive (``Runtime.send``)
 * the tools layer (:func:`dhc.agent.tools.register_default_tools` for the
-  channel/events tools, :func:`dhc.tooling.register_artifact_tools` for the
-  store tools) — exposed as REPL namespace callables, composed in here (the
+  framework tools, :func:`dhc.tooling.register_channel_tools` for the
+  channel tools, :func:`dhc.tooling.register_artifact_tools` for the store
+  tools) — exposed as REPL namespace callables, composed in here (the
   composition root), not in the core runtime.
 """
 
@@ -43,7 +45,8 @@ from .tooling import (
     StoreAdapter,
 )
 from .tooling.artifact_tools import register_artifact_tools
-from .ui.communication import (
+from .tooling.channel_tools import register_channel_tools
+from .tooling.channels import (
     EscalationChannel,
     Messenger,
     OperatorQuestionChannel,
@@ -55,7 +58,6 @@ from .llm.llm import ContextRotDetector
 from .errors import ChannelError, TurnError, TurnTimeoutError
 from .agent.event_stream import CompletionDispatcher, EventBus
 from .llm.fabrication import fabrication_kit
-from .data.models import Message
 from .ui.operator import Operator
 from .agent.repl import ReplEngine
 from .agent.runtime import Runtime
@@ -154,26 +156,6 @@ class _ReplEngineAdapter:
         raise TurnError(reason)
 
 
-class _BoundMessenger:
-    """A per-agent facade over the shared Messenger (INFO-015)."""
-
-    def __init__(self, messenger: Messenger, agent_id: str) -> None:
-        self._messenger = messenger
-        self._agent_id = agent_id
-
-    def send(self, recipient_id: str, body: str) -> Message:
-        return self._messenger.send(self._agent_id, recipient_id, body)
-
-    def inbox(self) -> list:
-        return self._messenger.inbox(self._agent_id)
-
-    def read(self, message_id: str) -> Message | None:
-        return self._messenger.read(self._agent_id, message_id)
-
-    def unread_count(self) -> int:
-        return self._messenger.unread_count(self._agent_id)
-
-
 def _extend_namespace(
     runtime: Runtime,
     bus: EventBus,
@@ -186,21 +168,26 @@ def _extend_namespace(
     """Compose the tools layer onto the runtime's core namespace.
 
     The core :class:`~dhc.runtime.Runtime` builds the slim base namespace
-    (agent, spawn, complete, fail, cancel, status, result, tool, bash,
-    await_, poll, children_of). This composition root installs the artifact
-    store (``dhc.tooling``) and communication channels as REPL tools via
-    :func:`dhc.tooling.register_artifact_tools` and
-    :func:`dhc.agent.tools.register_default_tools`, plus the driver factory
-    (MockDriver / driver_from_settings) that action blocks use to spawn
-    children.
+    (agent, spawn, send, complete, fail, cancel, status, result, tool, bash,
+    await_, poll, children_of) — ``send`` is the directed-message primitive
+    itself (decision 0015). This composition root installs the framework
+    tools (``list_tools``, ``events``) via
+    :func:`dhc.agent.tools.register_default_tools`, the channel tools
+    (rooms, escalation, operator questions, the messenger facade) via
+    :func:`dhc.tooling.register_channel_tools` (decision 0015), the artifact
+    store tools via :func:`dhc.tooling.register_artifact_tools` (decision
+    0014), plus the driver factory (MockDriver / driver_from_settings)
+    that action blocks use to spawn children.
     """
-    register_default_tools(
+    register_default_tools(runtime, bus=bus)
+    # The channel tools are operator tooling (decision 0015): policies over
+    # the core send primitive, composed here so the agent controls which
+    # communication patterns its stack carries.
+    register_channel_tools(
         runtime,
         bus=bus,
         channels={
-            # The messenger is a per-agent facade: bind it to the calling
-            # agent at namespace-build time.
-            "messenger": lambda agent_id: _BoundMessenger(messenger, agent_id),
+            "messenger": messenger,
             "rooms": rooms,
             "escalations": escalations,
             "questions": questions,
@@ -258,10 +245,12 @@ def build_runtime(
 
     The artifact store and channels are installed into the agent namespace as
     REPL tools (publish, read_artifact, archive, list_artifacts, room,
-    messenger, escalate, ask_operator, post, channel_read, list_tools) by
-    :func:`dhc.tooling.register_artifact_tools` and
+    messenger, escalate, ask_operator, post, channel_read, list_tools,
+    events) by :func:`dhc.tooling.register_artifact_tools`,
+    :func:`dhc.tooling.register_channel_tools`, and
     :func:`dhc.agent.tools.register_default_tools` — the composition root,
-    keeping the core (runtime + eventbus) slim and store-unaware.
+    keeping the core (runtime + eventbus + the ``send`` primitive) slim and
+    store/channel-unaware (decisions 0014/0015).
 
     *settings* defaults to the process-wide :func:`~dhc.config.get_settings`;
     *artifact_root* overrides the settings' artifact root; *mock* is kept for
@@ -296,7 +285,7 @@ def build_runtime(
     # directly — the kit is installable and testable WITHOUT the pump.
     runtime.repl_engine = raw_engine
 
-    messenger = Messenger(bus, registry=runtime._agents, sink=sink)
+    messenger = Messenger(bus)
     rooms = RoomManager(bus, sink=sink)
     escalations = EscalationChannel(bus)
     questions = OperatorQuestionChannel(bus)

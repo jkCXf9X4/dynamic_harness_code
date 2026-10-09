@@ -1,17 +1,19 @@
-"""Tests for the tools layer: channels and events as REPL tools.
+"""Tests for the framework tools layer and the registration split.
 
-The architectural goal: the CORE is only runtime + eventbus; the artifact
-store and communication channels are REPL-executed Python tools installed by
-registration functions — ``dhc.agent.tools.register_default_tools`` for the
-channel/events tools and ``dhc.tooling.register_artifact_tools`` for the
-store tools (decision 0014). These tests verify:
+The architectural goal: the CORE is runtime + eventbus + the directed-message
+primitive (``send``, decision 0015); the artifact store (0014), the
+communication channels (0015), and the introspection/event tools are
+REPL-executed Python tools installed by registration functions —
+``dhc.agent.tools.register_default_tools`` for the framework tools,
+``dhc.tooling.register_channel_tools`` for the channel tools, and
+``dhc.tooling.register_artifact_tools`` for the store tools. These tests
+verify:
 
 * registration installs all callables into the runtime namespace
+* the bare core namespace carries ``send`` (the primitive) and nothing else
 * publish -> read_artifact roundtrip with progressive disclosure
 * publish emits the ``artifact_published`` event
-* room / messenger / escalate / ask_operator work through the tools layer
-* list_tools lists the installed tools
-* the core namespace has no publish/room (they come from the registrations)
+* list_tools lists the union of the installed tools
 """
 
 import sys
@@ -23,20 +25,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dhc.tooling import ArtifactStore  # noqa: E402
 from dhc.tooling.artifact_tools import register_artifact_tools  # noqa: E402
-from dhc.ui.communication import (  # noqa: E402
+from dhc.tooling.channel_tools import register_channel_tools  # noqa: E402
+from dhc.tooling.channels import (  # noqa: E402
     EscalationChannel,
     Messenger,
     OperatorQuestionChannel,
     RoomManager,
 )
-from dhc.agent.event_stream import EventBus  # noqa: E402
+from dhc.agent.event_stream import CompletionDispatcher, EventBus  # noqa: E402
 from dhc.data.models import Artifact, EventKind  # noqa: E402
 from dhc.agent.runtime import Runtime  # noqa: E402
 from dhc.agent.tools import ToolContext, register_default_tools  # noqa: E402
+from dhc.wiring import _WiredBus  # noqa: E402
 
 CORE_NAMES = {
     "agent",
     "spawn",
+    "send",
     "complete",
     "fail",
     "cancel",
@@ -65,30 +70,22 @@ TOOL_NAMES = {
 }
 
 
-class _FakeBus:
-    """A minimal duck-typed bus recording published events."""
-
-    def __init__(self) -> None:
-        self.events = []
-
-    def publish(self, event) -> None:
-        self.events.append(event)
-
-
 def _wired_runtime(tmp_path):
-    """A bare Runtime with the tools layer installed over real modules."""
+    """A bare Runtime with the three tool registrations installed over real
+    modules — the same composition ``build_runtime`` performs."""
     store = ArtifactStore(Path(tmp_path))
     bus = EventBus()
-    messenger = Messenger(bus, registry={"a1", "a2"})
+    messenger = Messenger(bus)
     rooms = RoomManager(bus)
     escalations = EscalationChannel(bus)
     questions = OperatorQuestionChannel(bus)
-    runtime = Runtime(event_bus=bus)
-    register_default_tools(
+    runtime = Runtime(event_bus=_WiredBus(bus, CompletionDispatcher()))
+    register_default_tools(runtime, bus=bus)
+    register_channel_tools(
         runtime,
         bus=bus,
         channels={
-            "messenger": lambda agent_id: _BoundMessenger(messenger, agent_id),
+            "messenger": messenger,
             "rooms": rooms,
             "escalations": escalations,
             "questions": questions,
@@ -96,26 +93,6 @@ def _wired_runtime(tmp_path):
     )
     register_artifact_tools(runtime, store=store, bus=bus)
     return runtime, store, bus, messenger, rooms, escalations, questions
-
-
-class _BoundMessenger:
-    """Per-agent facade over the shared Messenger (mirrors wiring.py)."""
-
-    def __init__(self, messenger, agent_id):
-        self._messenger = messenger
-        self._agent_id = agent_id
-
-    def send(self, recipient_id, body):
-        return self._messenger.send(self._agent_id, recipient_id, body)
-
-    def inbox(self):
-        return self._messenger.inbox(self._agent_id)
-
-    def read(self, message_id):
-        return self._messenger.read(self._agent_id, message_id)
-
-    def unread_count(self):
-        return self._messenger.unread_count(self._agent_id)
 
 
 def _namespace(runtime, agent_id="a1"):
@@ -152,19 +129,39 @@ def test_core_namespace_has_no_publish_or_room(tmp_path):
     for name in CORE_NAMES:
         assert name in ns, f"core name {name!r} missing"
     # The tools are present only because the registration functions added
-    # them (register_default_tools + register_artifact_tools).
+    # them (register_default_tools + register_channel_tools +
+    # register_artifact_tools).
     assert "publish" in ns
     assert "room" in ns
 
 
 def test_bare_runtime_namespace_is_slim():
-    """Without the tools layer, the core namespace has no publish/room."""
+    """Without the tools layer, the core namespace has no publish/room —
+    but it DOES carry ``send``: direct messaging is the framework's
+    communication primitive (decision 0015), present in a bare runtime."""
     runtime = Runtime()
     ns = runtime._build_namespace(_fake_agent())
     assert "publish" not in ns
     assert "room" not in ns
+    assert "messenger" not in ns
     for name in CORE_NAMES:
         assert name in ns
+    assert callable(ns["send"])
+
+
+def test_default_tools_registration_split(tmp_path):
+    """register_default_tools alone installs ONLY the framework tools
+    (list_tools, events) — the channel and store tools come from their own
+    registrations (decisions 0014/0015)."""
+    bus = EventBus()
+    runtime = Runtime(event_bus=_WiredBus(bus, CompletionDispatcher()))
+    register_default_tools(runtime, bus=bus)
+    ns = _namespace(runtime)
+    assert set(ns) - CORE_NAMES - {"agent", "Await", "Poll", "Sleep"} == {
+        "list_tools",
+        "events",
+    }
+    assert runtime._installed_tool_names == {"list_tools", "events"}
 
 
 def _fake_agent():
@@ -178,19 +175,15 @@ def test_tool_context_duck_typed_fields():
     assert ctx.agent_id == "a1"
     assert ctx.runtime is not None
     assert ctx.bus is None
-    assert ctx.channels == {}
-    assert ctx.messenger is None
-    assert ctx.rooms is None
-    assert ctx.escalations is None
-    assert ctx.questions is None
 
 
-def test_tool_context_has_no_store_slot():
-    """The framework ToolContext carries no store (decision 0014)."""
+def test_tool_context_has_no_store_or_channels_slot():
+    """The framework ToolContext carries no store and no channels (0014/0015)."""
     import dataclasses
 
     fields = {f.name for f in dataclasses.fields(ToolContext)}
     assert "store" not in fields
+    assert "channels" not in fields
 
 
 # --------------------------------------------------------------------------- #
@@ -234,65 +227,6 @@ def test_list_artifacts_and_archive(tmp_path):
     path = ns["archive"](art.id)
     assert isinstance(path, str)
     assert Path(path).exists()
-
-
-# --------------------------------------------------------------------------- #
-# Channels through the tools layer
-# --------------------------------------------------------------------------- #
-
-
-def test_room_tool(tmp_path):
-    runtime, store, bus, messenger, rooms, *_ = _wired_runtime(tmp_path)
-    ns = _namespace(runtime, agent_id="a1")
-    room = ns["room"]("war-room")
-    assert room.name == "war-room"
-    assert "a1" in room.member_ids
-    msg = ns["post"]("war-room", "hello room")
-    assert msg.body == "hello room"
-    assert ns["channel_read"]("war-room") == [msg]
-
-
-def test_messenger_tool(tmp_path):
-    runtime, store, bus, messenger, *_ = _wired_runtime(tmp_path)
-    ns = _namespace(runtime, agent_id="a1")
-    sent = ns["messenger"].send("a2", "hello")
-    assert sent.body == "hello"
-    # a2's inbox has the message; a1's is empty.
-    assert len(messenger.inbox("a2")) == 1
-    assert messenger.unread_count("a2") == 1
-    assert ns["messenger"].inbox() == []
-    assert ns["messenger"].unread_count() == 0
-
-
-def test_escalate_tool(tmp_path):
-    runtime, store, bus, messenger, rooms, escalations, questions = _wired_runtime(
-        tmp_path
-    )
-    # Give the agent a parent so escalation has an upstream target.
-    from dhc.agent.agent import Agent
-
-    parent = Agent(id="parent", requirement="p")
-    runtime._agents["parent"] = parent
-    agent = Agent(id="a1", requirement="r", parent_id="parent")
-    runtime._agents["a1"] = agent
-    ns = runtime._build_namespace(agent)
-    event = ns["escalate"]("requirement-x", "unreachable")
-    assert event.kind == EventKind.escalation
-    assert event.agent_id == "parent"
-    assert event.payload["requirement"] == "requirement-x"
-    assert event.payload["reason"] == "unreachable"
-    assert escalations.pending_for("parent")
-
-
-def test_ask_operator_tool(tmp_path):
-    runtime, store, bus, messenger, rooms, escalations, questions = _wired_runtime(
-        tmp_path
-    )
-    ns = _namespace(runtime, agent_id="a1")
-    event = ns["ask_operator"]("which provider?")
-    assert event.kind == EventKind.operator_question
-    assert event.agent_id == "a1"
-    assert questions.pending_questions()
 
 
 def test_list_tools(tmp_path):

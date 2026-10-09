@@ -8,7 +8,9 @@ The runtime delivers this surface into each agent's REPL namespace; agent code
 never touches the runtime directly. The only collaborator is the runtime
 itself, injected by the constructor — this module imports no sibling modules
 at module level. Artifact publication is a composed namespace tool
-(``dhc.tooling``), not an agent method (decision 0014).
+(``dhc.tooling``), not an agent method (decision 0014). Direct messaging is
+the one communication primitive on the agent itself: :meth:`Agent.send`
+delegates to ``Runtime.send`` (decision 0015); channel policies are tooling.
 """
 
 from __future__ import annotations
@@ -68,31 +70,6 @@ def bash(cmd: str, timeout: float = 30.0) -> str:
         err = proc.stderr or ""
         return f"exit {proc.returncode}\n{out}\n{err}".strip()
     return out
-
-
-# --------------------------------------------------------------------------- #
-# In-memory room registry (standalone default; the real communication module
-# is wired by the integration agent later).
-# --------------------------------------------------------------------------- #
-
-
-class _Room:
-    """Minimal in-memory room: a name plus member ids."""
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.members: list[str] = []
-
-
-_ROOMS: dict[str, _Room] = {}
-
-
-def room(agent: "Agent", name: str) -> _Room:
-    """Return the shared room *name*, registering *agent* as a member."""
-    r = _ROOMS.setdefault(name, _Room(name))
-    if agent.id not in r.members:
-        r.members.append(agent.id)
-    return r
 
 
 # --------------------------------------------------------------------------- #
@@ -229,6 +206,22 @@ class Agent:
         # Runtime.spawn already registered the child on this agent's children
         # list (parent_id was passed); do not append again.
         return child.get()
+
+    # -- directed messaging (framework primitive, 0015) ---------------------
+
+    def send(self, recipient_id: str, body: str):
+        """Send a direct message to *recipient_id* (INFO-015, decision 0015).
+
+        Delegates to :meth:`Runtime.send` — the framework's communication
+        primitive. The message is delivered on the recipient's own event
+        stream (digest, recent context, ``events`` tool) with no channel
+        tooling installed; rooms, escalation, and operator questions are
+        composed policies over this primitive (``dhc.tooling``), so the
+        agent keeps full control of how it communicates.
+        """
+        if self._runtime is None:
+            raise RuntimeError("agent is not attached to a runtime")
+        return self._runtime.send(self.id, recipient_id, body)
 
     # -- results -------------------------------------------------------------
 

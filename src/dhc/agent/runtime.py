@@ -17,7 +17,12 @@ module level. When a collaborator is omitted, a lightweight in-memory default
 is created so the runtime is usable standalone; the real modules are wired by
 the integration agent later. The runtime is store-unaware (decision 0014):
 artifact persistence is operator tooling (``dhc.tooling``) composed in by the
-composition root, not a core collaborator.
+composition root, not a core collaborator. Directed agent-to-agent messaging
+IS core (decision 0015): :meth:`Runtime.send` is the framework's
+communication primitive — a receiver-addressed ``message_sent`` event on the
+recipient's own stream. Channel policies (rooms, escalation, operator
+questions) are tooling composed over that primitive, never runtime
+collaborators.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from __future__ import annotations
 import threading
 import time
 import traceback
+import uuid
 from typing import Any, Callable, Optional
 
 from .agent import Agent, AgentHandle, bash
@@ -144,6 +150,7 @@ class Runtime:
     - ``get(agent_id) -> Agent``
     - ``children_of(agent_id) -> list[str]``
     - ``is_settled(agent_id) -> bool``
+    - ``send(sender_id, recipient_id, body) -> Event`` (direct message, 0015)
 
     ``await`` is a Python keyword, so the blocking join is named ``await_``
     (documented deviation; the operation is unchanged).
@@ -428,15 +435,18 @@ class Runtime:
     def _build_namespace(self, agent: Agent) -> dict:
         """Build the in-code namespace for one turn from the Agent.
 
-        CORE-ONLY names (the architectural goal: core = runtime + eventbus).
-        The artifact store (``dhc.tooling``) and communication channels are
-        REPL tools composed in by ``dhc.agent.tools.register_default_tools``
-        and ``dhc.tooling.register_artifact_tools`` (via wiring.py), not part
-        of the core namespace.
+        CORE-ONLY names (the architectural goal: core = runtime + eventbus +
+        the directed-message primitive, 0015). The artifact store and the
+        communication channels are REPL tools composed in by the registration
+        functions (``dhc.agent.tools``, ``dhc.tooling`` — via wiring.py), not
+        part of the core namespace. ``send`` is the one communication name
+        here: direct messaging is the framework primitive every agent gets,
+        even in a bare runtime with no tooling installed.
         """
         ns = {
             "agent": agent,
             "spawn": agent.spawn,
+            "send": agent.send,
             "complete": agent.complete,
             "fail": agent.fail,
             "cancel": agent.cancel,
@@ -634,6 +644,41 @@ class Runtime:
             if agent_id not in self._agents:
                 raise KeyError(f"unknown agent {agent_id!r}")
             return is_terminal(self._agents[agent_id]._status)
+
+    # -- directed messaging (the framework communication primitive, 0015) --
+
+    def send(self, sender_id: str, recipient_id: str, body: str) -> Event:
+        """Send a direct message from *sender_id* to *recipient_id*.
+
+        The framework's communication primitive (decision 0015): direct
+        agent-to-agent messaging is core; channel policies (rooms,
+        escalation, operator questions) are tooling composed over it.
+        Emits a *receiver-addressed* ``message_sent`` event on the
+        recipient's own event stream, so the message rides the existing
+        delivery pipeline — the recipient's digest, recent context, and
+        ``events`` tool — with no channel installed. The event is
+        persisted before delivery (bus discipline), FIFO-ordered, and
+        bounded on the receiving side by the ``messages_per_step`` cap.
+
+        *sender_id* is a free-form identity (an agent passes its id; the
+        operator passes ``"operator"``). *recipient_id* must be a live
+        agent. *body* is a short value — large content belongs in an
+        artifact reference (context encapsulation).
+        """
+        with self._lock:
+            if recipient_id not in self._agents:
+                raise ChannelError(f"unknown recipient {recipient_id!r}")
+        event = Event(
+            kind=EventKind.message_sent,
+            agent_id=recipient_id,
+            payload={
+                "sender_id": sender_id,
+                "message_id": uuid.uuid4().hex,
+                "body": body,
+            },
+        )
+        self.event_bus.publish(f"events:{recipient_id}", event)
+        return event
 
     # -- completion stream (runtime-owned dispatch) --------------------------
 

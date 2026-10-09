@@ -142,7 +142,11 @@ class Terminal:
         )
         #: The one root agent kept across turns (reference pattern).
         self.root_agent: Any = None
-        self._operator = Operator(runtime=runtime)
+        # Prefer the WIRED operator (composition root): it carries the
+        # question channel, so `ask_operator` questions asked mid-run by
+        # agents actually reach the human at this terminal (INFO-023).
+        wired = getattr(runtime, "operator", None)
+        self._operator = wired if wired is not None else Operator(runtime=runtime)
 
     # -- output -------------------------------------------------------------
 

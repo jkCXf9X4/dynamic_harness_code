@@ -51,11 +51,14 @@ dhc                   # real LLM driver (gpt-4o by default)
 operator (root door) ──> Runtime ──> per-agent worker thread
                         │             └─> ReplEngine (persistent REPL)
                         │             └─> driver (LLMDriver | MockDriver)
+                        ├─> send() — directed messages: the framework's
+                        │    communication primitive (0015)
                         ├─> EventBus ──> BoundaryEventLog (persist sink)
                         ├─> CompletionDispatcher (at-most-once, FIFO)
-                        ├─> ArtifactStore (content-addressed, 3 tiers)
-                        └─> channels: Messenger, RoomManager,
-                                      EscalationChannel, OperatorQuestionChannel
+                        └─> operator tooling (0014/0015), composed at the root:
+                              ArtifactStore (content-addressed, 3 tiers)
+                              channels: Messenger, RoomManager,
+                              EscalationChannel, OperatorQuestionChannel
 ```
 
 `dhc.wiring.build_runtime(settings=None, mock=False)` wires the real modules
@@ -75,11 +78,12 @@ tooling exposed (`runtime.messenger`, `runtime.rooms`, `runtime.escalations`,
 | `tooling/artifact_tools.py` | the store's REPL tools: `publish`, `read_artifact`, `archive`, `list_artifacts` |
 | `repl.py` | per-agent persistent `ReplEngine` (INFO-050) |
 | `event_stream.py` | `EventStream`, `EventBus`, `CompletionDispatcher` (INFO-046/047/048) |
-| `agent.py` | the in-code surface: `Agent`, `AgentHandle`, `bash`, `room` |
-| `runtime.py` | `Runtime`: spawn/await/poll/cancel/status/result, parent liveness, worker loop |
+| `agent.py` | the in-code surface: `Agent`, `AgentHandle`, `bash`, `send` (the directed-message primitive, 0015) |
+| `runtime.py` | `Runtime`: spawn/await/poll/cancel/status/result/send, parent liveness, worker loop |
 | `llm.py` | `LLMClient`, `MockLLM`, `ContextRotDetector` (INFO-020/021) |
 | `driver.py` | `LLMDriver`, `MockDriver`, `driver_from_settings` — the pluggable brain |
-| `communication.py` | `Messenger`, `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel` |
+| `tooling/channels.py` | `Messenger`, `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel` — communication policies over the core `send` primitive (0015) |
+| `tooling/channel_tools.py` | the channels' REPL tools: `room`, `messenger`, `escalate`, `ask_operator`, `post`, `channel_read` |
 | `operator.py` | root door, chat loop, mid-turn steering, operator questions |
 | `cli.py` | minimal chat-only TUI (INFO-028) |
 | `wiring.py` | `build_runtime` — binds the real modules into one runtime |

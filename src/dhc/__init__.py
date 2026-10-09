@@ -16,11 +16,13 @@ documented test and demo path; the real LLM path activates only when
 
 Layout (src layout, REV 2):
     agent/    agent-controlled execution core (runtime, repl, agent, tools,
-              state, checkpoint, event_stream) — store-unaware (0014)
+              state, checkpoint, event_stream) — store/channel-unaware
+              (0014/0015); owns the directed-message primitive (send)
     llm/      provider plumbing (llm, driver, prompts, fabrication)
-    ui/       operator surface (terminal, operator, communication)
+    ui/       operator surface (terminal, operator)
     data/     schemas, config (models, config, trace)
-    tooling/  operator tooling: artifact store, boundary log, store tools
+    tooling/  operator tooling: artifact store, boundary log, communication
+              channels, and their namespace tools (0014/0015)
     benchmark/  unchanged subpackage
     cli.py, wiring.py, errors.py  top-level (entry point, composition root,
               cross-cutting error hierarchy)
@@ -37,8 +39,8 @@ from . import (
     ui,
     wiring,
 )
-from .agent.agent import Agent, AgentHandle, ToolResult, bash, room
-from .ui.communication import (
+from .agent.agent import Agent, AgentHandle, ToolResult, bash
+from .tooling.channels import (
     EscalationChannel,
     Messenger,
     OperatorQuestionChannel,
@@ -120,7 +122,6 @@ __all__ = [
     "AgentHandle",
     "ToolResult",
     "bash",
-    "room",
     # event stream
     "EventStream",
     "EventBus",

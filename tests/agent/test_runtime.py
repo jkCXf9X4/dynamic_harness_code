@@ -661,14 +661,15 @@ def test_stop_joins_all_threads():
 def test_room_registry():
     """room is a TOOL (not core): it must be installed via the tools layer.
 
-    The core namespace is slim (no room); the tools layer composes it in.
+    The core namespace is slim (no room); the channel tooling composes it in
+    (decision 0015: channels are tooling over the core send primitive).
     """
-    from dhc.ui.communication import RoomManager
-    from dhc.agent.tools import register_default_tools
+    from dhc.tooling.channels import RoomManager
+    from dhc.tooling.channel_tools import register_channel_tools
 
     rt = make_runtime()
     rooms = RoomManager(rt.event_bus)
-    register_default_tools(rt, channels={"rooms": rooms})
+    register_channel_tools(rt, channels={"rooms": rooms})
     handle = rt.spawn(
         "do it",
         driver=ScriptedDriver(

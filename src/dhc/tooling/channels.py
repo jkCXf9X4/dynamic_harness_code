@@ -1,20 +1,27 @@
-"""Peer communication channels for dhc.
+"""Communication channels: policies over the core message primitive.
 
-Implements the agent-facing messaging surface on top of the runtime-owned
-event bus (INFO-011/015/016/023):
+Operator tooling (decision 0015): direct agent-to-agent messaging is a
+framework primitive (``Runtime.send`` / ``Agent.send``) — a
+receiver-addressed ``message_sent`` event delivered on the recipient's own
+stream. Everything above that primitive is a *policy* this package composes,
+so the agent keeps full control of its communication (use, replace, or
+ignore each channel):
 
-- :class:`Messenger` — direct point-to-point messaging by identity (INFO-015).
-- :class:`RoomManager` — shared rooms, many-to-many (INFO-016).
-- :class:`EscalationChannel` — escalate an unreachable requirement up the
+* :class:`Messenger` — per-recipient inbox/read-state view over the core
+  message events (INFO-015). A *view*, not a delivery mechanism: with no
+  Messenger installed, messages still arrive (digest, recent context,
+  ``events`` tool).
+* :class:`RoomManager` — shared rooms, many-to-many (INFO-016).
+* :class:`EscalationChannel` — escalate an unreachable requirement up the
   parent chain (INFO-011).
-- :class:`OperatorQuestionChannel` — any agent can ask the operator a question
-  (INFO-023).
+* :class:`OperatorQuestionChannel` — any agent can ask the operator a
+  question (INFO-023).
 
-Every channel takes the injected :class:`~dhc.event_stream.EventBus`
+Every channel takes the injected :class:`~dhc.agent.event_stream.EventBus`
 (duck-typed: ``publish(event)``, ``subscribe_global(callback)``) so tests can
-use a fake bus. Events carry the correct :class:`~dhc.models.EventKind` and
-payloads are by reference (ids / short values, never live handles). Channel
-misuse raises :class:`~dhc.errors.ChannelError`.
+use a fake bus. Events carry the correct :class:`~dhc.data.models.EventKind`
+and payloads are by reference (ids / short values, never live handles).
+Channel misuse raises :class:`~dhc.errors.ChannelError`.
 """
 
 from __future__ import annotations
@@ -31,73 +38,65 @@ def _new_id() -> str:
     return uuid.uuid4().hex
 
 
-class Messenger:
-    """Direct point-to-point messaging by identity (INFO-015).
+def _to_message(event: Event) -> Message:
+    """Rebuild the tool-facing :class:`Message` from a message event."""
+    return Message(
+        sender_id=str(event.payload.get("sender_id", "")),
+        recipient_id=event.agent_id,
+        body=str(event.payload.get("body", "")),
+    )
 
-    Messages queue per recipient in FIFO order. An optional duck-typed
-    ``sink`` (``sink.append(message)``) persists each sent message for
-    durability. The registry of known agent ids is injected (a container
-    supporting ``in``, or a callable); sending to an unknown recipient raises
-    :class:`~dhc.errors.ChannelError`.
+
+class Messenger:
+    """Per-recipient inbox view over the core message primitive (INFO-015).
+
+    Delivery is framework-owned (decision 0015): ``Runtime.send`` emits a
+    receiver-addressed ``message_sent`` event on the recipient's own event
+    stream, so the message arrives in the recipient's digest, recent
+    context, and ``events`` tool *whether or not this channel exists*.
+    This channel is a *view*: it observes the global feed, files each
+    recipient's messages in arrival (FIFO) order, and tracks reads. It
+    owns no delivery queues — the stream is the single source of truth,
+    and sending goes through the runtime's ``send`` (the tooling facade
+    in :mod:`dhc.tooling.channel_tools` calls it).
     """
 
-    def __init__(self, bus, registry, sink: Optional[object] = None) -> None:
+    def __init__(self, bus) -> None:
         self._bus = bus
-        self._registry = registry
-        self._sink = sink
-        # recipient_id -> [(message_id, Message, read_flag)] in send order.
-        self._queues: dict[str, list[tuple[str, Message, bool]]] = {}
+        # recipient_id -> [(message_id, Event, read_flag)] in arrival order.
+        self._seen: dict[str, list[tuple[str, Event, bool]]] = {}
         self._lock = threading.RLock()
+        bus.subscribe_global(self._on_event)
 
-    def _known(self, agent_id: str) -> bool:
-        if callable(self._registry):
-            return bool(self._registry(agent_id))
-        return agent_id in self._registry
-
-    def send(self, sender_id: str, recipient_id: str, body: str) -> Message:
-        """Send *body* from *sender_id* to *recipient_id*.
-
-        Emits a ``message_sent`` event on the bus; raises ``ChannelError`` if
-        the recipient is not in the injected registry.
-        """
-        if not self._known(recipient_id):
-            raise ChannelError(f"unknown recipient {recipient_id!r}")
-        message = Message(sender_id=sender_id, recipient_id=recipient_id, body=body)
-        message_id = _new_id()
+    def _on_event(self, event: Event) -> None:
+        if event.kind is not EventKind.message_sent:
+            return
+        message_id = str(event.payload.get("message_id", ""))
         with self._lock:
-            self._queues.setdefault(recipient_id, []).append(
-                (message_id, message, False)
+            self._seen.setdefault(event.agent_id, []).append(
+                (message_id, event, False)
             )
-        if self._sink is not None:
-            self._sink.append(message)
-        self._bus.publish(
-            Event(
-                kind=EventKind.message_sent,
-                agent_id=sender_id,
-                payload={"recipient_id": recipient_id, "message_id": message_id},
-            )
-        )
-        return message
 
     def inbox(self, agent_id: str) -> list[Message]:
-        """Return all messages for *agent_id* in FIFO (send) order."""
+        """Return all messages for *agent_id* in arrival (FIFO) order."""
         with self._lock:
-            return [m for _, m, _ in self._queues.get(agent_id, [])]
+            return [_to_message(entry) for _, entry, _ in
+                    self._seen.get(agent_id, [])]
 
     def read(self, agent_id: str, message_id: str) -> Message | None:
         """Mark the message *message_id* as read and return it (or ``None``)."""
         with self._lock:
-            entries = self._queues.get(agent_id, [])
-            for i, (mid, msg, _) in enumerate(entries):
+            entries = self._seen.get(agent_id, [])
+            for i, (mid, event, _) in enumerate(entries):
                 if mid == message_id:
-                    entries[i] = (mid, msg, True)
-                    return msg
+                    entries[i] = (mid, event, True)
+                    return _to_message(event)
         return None
 
     def unread_count(self, agent_id: str) -> int:
         """Number of messages for *agent_id* not yet read."""
         with self._lock:
-            return sum(1 for _, _, read in self._queues.get(agent_id, []) if not read)
+            return sum(1 for _, _, read in self._seen.get(agent_id, []) if not read)
 
 
 class RoomManager:

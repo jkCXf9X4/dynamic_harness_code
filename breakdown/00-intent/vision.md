@@ -60,10 +60,16 @@ keeps agent turns few.
    the durable medium for findings that cross agents or must outlive the agent.
 10. **The core owns the contract; the operator owns the medium.** The framework
     core is a small, stable set of guarantees — lifecycle, settlement,
-    containment, caps, event discipline. Whatever an operator needs —
-    persisting, observing, or rendering state — is tooling composed around
-    that core, one-way dependent on it, never inside it. Where the line falls
-    for a new concern is decided in the architecture (`INFO-053`, `0014`).
+    containment, caps, event discipline, and one communication primitive:
+    any agent can `send` to any other by identity, and the message is
+    guaranteed to reach the recipient's awareness (`0015`). Whatever an
+    operator needs — persisting, observing, or rendering state — and every
+    communication pattern *above* direct messaging (rooms, escalation
+    routing, operator questions) is tooling composed around that core,
+    one-way dependent on it, never inside it: the agent's communication
+    beyond the primitive is its own composition choice. Where the line
+    falls for a new concern is decided in the architecture (`INFO-053`,
+    `0014`, `0015`).
 
 ## Inspirations
 

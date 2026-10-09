@@ -31,6 +31,7 @@ Design notes
 from __future__ import annotations
 
 import sys
+import time
 from typing import Any, Callable, Optional
 
 from ..data.models import Result
@@ -149,7 +150,20 @@ class Operator:
         if driver is None:
             driver = DefaultDriver()
         handle = self.runtime.spawn(requirement=requirement, driver=driver)
+        is_settled = getattr(self.runtime, "is_settled", None)
+        if callable(is_settled) and self.question_channel is not None:
+            # Answer operator questions MID-RUN (INFO-023): poll for
+            # settlement instead of blocking in await_, sweeping the
+            # question channel each pass so a question asked mid-turn
+            # reaches the human before the run settles. The asking agent
+            # reads the answer as an event on its own stream (0015).
+            while not is_settled(handle.id):
+                self.answer_questions(loop=False)
+                time.sleep(0.05)
         completion = self.runtime.await_(handle.id)
+        # Final sweep: late questions (asked after settlement) still get
+        # answered; the answer event lands on the asker's stream.
+        self.answer_questions(loop=False)
         return Result(
             done=True,
             ok=completion.status.value == "completed",
@@ -163,12 +177,21 @@ class Operator:
     def steer(self, agent_id: str, message: str) -> None:
         """Inject *message* into a running agent's context (mid-turn steering).
 
-        The committed runtime has no steer hook, so delivery is attempted via
-        the injected duck-typed ``messenger`` (``send(sender_id,
-        recipient_id, body)``) when one is present. Without a messenger the
-        message is recorded on :attr:`undelivered_steers` — a documented
-        no-op — so the operator never raises on steering.
+        Delivery rides the framework's directed-message primitive
+        (``runtime.send("operator", agent_id, message)``, decision 0015)
+        when the runtime provides it — the message lands on the agent's
+        own event stream. Fallbacks: the injected duck-typed ``messenger``
+        (``send(sender_id, recipient_id, body)``), else a documented no-op
+        recorded on :attr:`undelivered_steers` — the operator never raises
+        on steering.
         """
+        send = getattr(self.runtime, "send", None)
+        if callable(send):
+            try:
+                send("operator", agent_id, message)
+                return
+            except Exception:  # noqa: BLE001 - steering never raises
+                pass
         if self.messenger is not None:
             self.messenger.send(
                 sender_id="operator", recipient_id=agent_id, body=message
