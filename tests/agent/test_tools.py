@@ -58,6 +58,7 @@ TOOL_NAMES = {
     "post",
     "channel_read",
     "list_tools",
+    "events",
 }
 
 

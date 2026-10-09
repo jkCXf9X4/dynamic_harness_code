@@ -198,6 +198,23 @@ def _list_tools(ctx: ToolContext) -> list[str]:
     return sorted(_TOOL_NAMES)
 
 
+def _events(ctx: ToolContext) -> list:
+    """The agent's own settled events, consume-once (G-04).
+
+    Wraps the runtime's ``tool_events`` surface: the agent reads its own
+    settled events on its own schedule (its choice, per INFO-053) without
+    rewriting the runner. The consume-once cursor is the tool's own, so the
+    agent's consumption never steals from the default runner's ``observe``
+    (``_event_cursors``) or the caps watchdog (``_caps_cursors``). The
+    discipline guarantees (FIFO, at-most-once, persist-before-execute)
+    remain runtime-owned — this only advances a read cursor over the
+    already-persisted, ordered stream.
+    """
+    if ctx.runtime is None:
+        raise RuntimeError("no runtime wired into the tools layer")
+    return ctx.runtime.tool_events(ctx.agent_id)
+
+
 # --------------------------------------------------------------------------- #
 # Registration
 # --------------------------------------------------------------------------- #
@@ -216,6 +233,7 @@ _TOOL_NAMES: frozenset[str] = frozenset(
         "post",
         "channel_read",
         "list_tools",
+        "events",
     }
 )
 
@@ -245,6 +263,7 @@ def _bind(ctx: ToolContext) -> dict[str, Callable[..., Any]]:
         "post": lambda room_name, body: _post(ctx, room_name, body),
         "channel_read": lambda topic: _channel_read(ctx, topic),
         "list_tools": lambda: _list_tools(ctx),
+        "events": lambda: _events(ctx),
     }
 
 
