@@ -17,6 +17,7 @@ import pytest
 from dhc.agent.agent import Agent
 from dhc.llm.driver import MockDriver
 from dhc.agent.state import AgentNode, StateWriter, build_agent_tree
+from dhc.ui import terminal as terminal_module
 from dhc.ui.terminal import Terminal, main, render_text_tree
 from dhc.wiring import build_runtime
 
@@ -348,6 +349,71 @@ def test_main_unknown_flag_raises_system_exit(tmp_path, monkeypatch):
     monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     with pytest.raises(SystemExit):
         main(["--bogus"])
+
+
+# --------------------------------------------------------------------------- #
+# H-02: --config is wired (highest-precedence harness.json layer)
+# --------------------------------------------------------------------------- #
+
+
+def test_main_config_flag_loads_explicit_harness_json(tmp_path, monkeypatch):
+    """--config PATH loads that harness.json into the runtime's settings."""
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    cfg = tmp_path / "harness.json"
+    cfg.write_text(
+        json.dumps({"llm": {"model": "h02-test-model"}}), encoding="utf-8"
+    )
+    captured = {}
+
+    real_build_runtime = terminal_module.build_runtime
+
+    def spy_build_runtime(**kwargs):
+        captured["settings"] = kwargs.get("settings")
+        return real_build_runtime(**kwargs)
+
+    monkeypatch.setattr(terminal_module, "build_runtime", spy_build_runtime)
+    code = main(["--requirement", "do the thing", "--mock", "--config", str(cfg)])
+    assert code == 0
+    settings = captured["settings"]
+    assert settings is not None
+    assert settings.provider.model == "h02-test-model"
+
+
+def test_main_config_flag_missing_file_raises(tmp_path, monkeypatch):
+    """A missing explicit --config file raises (not a silent no-op)."""
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    with pytest.raises(Exception):
+        main(["--requirement", "x", "--mock", "--config", str(tmp_path / "nope.json")])
+
+
+def test_main_model_override_applies_to_provider(tmp_path, monkeypatch):
+    """--model reaches settings.provider (the read-only property is honored)."""
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    captured = {}
+
+    real_build_runtime = terminal_module.build_runtime
+
+    def spy_build_runtime(**kwargs):
+        captured["settings"] = kwargs.get("settings")
+        return real_build_runtime(**kwargs)
+
+    monkeypatch.setattr(terminal_module, "build_runtime", spy_build_runtime)
+    code = main(["--requirement", "x", "--mock", "--model", "h02-cli-model"])
+    assert code == 0
+    assert captured["settings"].provider.model == "h02-cli-model"
+
+
+def test_terminal_parser_still_accepts_config_flag():
+    """build_parser() exposes --config (help text matches the wired behavior)."""
+    parser = terminal_module.build_parser()
+    args = parser.parse_args(["--config", "harness.json"])
+    assert args.config == "harness.json"
+    help_text = parser.format_help()
+    assert "--config" in help_text
+    assert "harness.json" in help_text
 
 
 # --------------------------------------------------------------------------- #
