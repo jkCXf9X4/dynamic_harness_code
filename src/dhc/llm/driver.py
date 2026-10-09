@@ -107,6 +107,14 @@ class LLMDriver:
             return None
         if self._rot_detector is not None:
             report = self._rot_detector.observe(code)
+            # G-06: stash the latest report on the agent — a
+            # runtime-machinery rendezvous (like ``agent._last_result``)
+            # the pump's between-step rot tripwire reads. Observe-only:
+            # the block is still returned unchanged.
+            try:
+                agent._last_rot_report = report
+            except Exception:  # noqa: BLE001 - best-effort rendezvous
+                pass
             if report.rot:
                 logger.warning(
                     "context rot detected for agent %s (score=%.3f, signals=%s)",
