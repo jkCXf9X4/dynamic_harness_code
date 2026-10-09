@@ -36,7 +36,11 @@ keeps agent turns few.
 2. **Agent = unit of execution.** Every agent is wrapped in its own thread/process; a
    crashed child is contained in its thread and surfaces as a failed result.
 3. **Clean Python, injected traceability.** Agent code is python; all
-   harness plumbing is runtime-owned and invisible — instrumentation is never agent-authored.
+   harness plumbing is runtime-owned and invisible. The detection heuristics are
+   runtime-owned instrumentation the agent never authors; the agent's own rot policy —
+   `context.rot_policy` (threshold and reaction) — is ordinary workspace data it may
+   author and edit, observe-only by default, and it can only tighten the default,
+   never loosen it or disable detection (`INFO-021`).
 4. **Agent-developed tools.** Capabilities are extensible by agents themselves, outside
    the harness release cycle — the harness is a substrate, not a tool set.
 5. **Recursive task decomposition.** Parents decompose by writing delegation code. 
