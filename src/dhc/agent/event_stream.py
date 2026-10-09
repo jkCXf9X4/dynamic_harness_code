@@ -15,9 +15,10 @@ Implements the runtime-owned event resolution semantics:
   stream surface (``drain``/``pending_count``) belongs to the runtime's event
   loop, never to agent code.
 
-The sink is duck-typed (``sink.append(event)``) so the sibling
-``artifact_store.BoundaryEventLog`` can be wired in later; ``None`` means
-no-op persistence.
+The sink is duck-typed (``sink.append(event)``) so the operator-side
+``dhc.tooling.BoundaryEventLog`` can be wired in by the composition root;
+``None`` means no-op persistence. The core only ever sees events — which
+persistence they end up in is a tooling concern (decision 0014).
 """
 
 from __future__ import annotations

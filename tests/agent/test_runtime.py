@@ -16,7 +16,6 @@ from dhc.errors import ChannelError
 from dhc.data.models import (
     TERMINAL_STATES,
     AgentStatus,
-    Artifact,
     Completion,
     EventKind,
     Result,
@@ -139,15 +138,11 @@ def test_agent_tool_captures_output_and_errors():
     assert "ValueError" in err.text and "kaboom" in err.text
 
 
-def test_agent_publish_uses_injected_store():
-    from dhc.agent.runtime import _MemoryStore
-
-    store = _MemoryStore()
-    agent = Agent(id="a1", requirement="r", artifact_store=store)
-    art = agent.publish("headline", "summary", "full body")
-    assert isinstance(art, Artifact)
-    assert art.id.startswith("sha256:")
-    assert store.get(art.id) is art
+def test_agent_has_no_publish_method():
+    """Publishing is a composed tooling namespace tool, not an agent method
+    (decision 0014): the framework core is store-unaware."""
+    agent = Agent(id="a1", requirement="r")
+    assert not hasattr(agent, "publish")
 
 
 def test_agent_spawn_delegates_to_runtime():
@@ -673,7 +668,7 @@ def test_room_registry():
 
     rt = make_runtime()
     rooms = RoomManager(rt.event_bus)
-    register_default_tools(rt, store=rt.artifact_store, channels={"rooms": rooms})
+    register_default_tools(rt, channels={"rooms": rooms})
     handle = rt.spawn(
         "do it",
         driver=ScriptedDriver(

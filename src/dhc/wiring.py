@@ -1,40 +1,48 @@
 """Wiring: build a fully-wired Runtime from the real committed modules.
 
 The committed :class:`~dhc.runtime.Runtime` was written against lightweight
-in-memory duck-types (``_MemoryEngine``, ``_MemoryBus``, ``_MemoryStore``)
-with a topic-based bus contract (``publish(topic, event)`` /
-``drain(topic)``). The real modules have richer contracts:
+in-memory duck-types (``_MemoryEngine``, ``_MemoryBus``) with a topic-based
+bus contract (``publish(topic, event)`` / ``drain(topic)``). The real
+modules have richer contracts:
 
 * :class:`~dhc.repl.ReplEngine.execute` returns a :class:`~dhc.models.Result`
   and never raises (failures are values, INFO-020), while the runtime expects
   a raising engine (it catches ``TurnTimeoutError`` / ``Exception``).
 * :class:`~dhc.event_stream.EventBus.publish(event)` takes one argument and
   routes by ``event.agent_id``; the runtime calls ``publish(topic, event)``.
-* :class:`~dhc.artifact_store.ArtifactStore` has ``put(artifact)``, while the
-  in-code surface calls ``store.publish(headline, summary, report)``.
 
-:func:`build_runtime` bridges these seams with small adapters (all in this
-file — no committed module is edited) and wires the real modules together:
+:func:`build_runtime` bridges these seams with small adapters and wires the
+real modules together. It is the composition root and the ONLY place the
+operator tooling (:mod:`dhc.tooling` — the artifact store and boundary log,
+per decision 0014) is instantiated: the framework core is store-unaware and
+the store adapter is attached to the runtime post-construction, like the
+other wiring-level attributes.
 
 * :class:`~dhc.repl.ReplEngine` — per-agent persistent REPL (INFO-050)
 * :class:`~dhc.event_stream.EventBus` with the
-  :class:`~dhc.artifact_store.BoundaryEventLog` as its persist sink (INFO-049)
+  :class:`~dhc.tooling.BoundaryEventLog` as its persist sink (INFO-049)
 * :class:`~dhc.event_stream.CompletionDispatcher` — at-most-once (INFO-046)
-* :class:`~dhc.artifact_store.ArtifactStore` — content-addressed (INFO-006)
+* :class:`~dhc.tooling.ArtifactStore` — content-addressed (INFO-006)
 * the communication channels (Messenger, RoomManager, EscalationChannel,
   OperatorQuestionChannel) on the same bus
-* the tools layer (:func:`dhc.tools.register_default_tools`) — the artifact
-  store and channels exposed as REPL namespace callables, composed in here
-  (the composition root), not in the core runtime.
+* the tools layer (:func:`dhc.agent.tools.register_default_tools` for the
+  channel/events tools, :func:`dhc.tooling.register_artifact_tools` for the
+  store tools) — exposed as REPL namespace callables, composed in here (the
+  composition root), not in the core runtime.
 """
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .data.artifact_store import ArtifactStore, BoundaryEventLog
+from .tooling import (
+    ArtifactStore,
+    BoundaryEventLog,
+    BoundarySink,
+    StoreAdapter,
+)
+from .tooling.artifact_tools import register_artifact_tools
 from .ui.communication import (
     EscalationChannel,
     Messenger,
@@ -47,93 +55,11 @@ from .llm.llm import ContextRotDetector
 from .errors import ChannelError, TurnError, TurnTimeoutError
 from .agent.event_stream import CompletionDispatcher, EventBus
 from .llm.fabrication import fabrication_kit
-from .data.models import Artifact, Event, EventKind, Message
+from .data.models import Message
 from .ui.operator import Operator
 from .agent.repl import ReplEngine
 from .agent.runtime import Runtime
-from .agent.tools import ToolContext, register_default_tools
-
-#: Map the runtime's event kinds onto the five boundary kinds (INFO-049).
-_BOUNDARY_KIND = {
-    EventKind.child_spawned: "spawned",
-    EventKind.child_settled: "settled",
-    EventKind.cancelled: "cancelled",
-    EventKind.artifact_published: "published",
-    EventKind.message_sent: "messaged",
-    EventKind.room_message: "messaged",
-}
-
-
-class _BoundarySink:
-    """Adapt the bus/messenger sinks to the BoundaryEventLog (INFO-049).
-
-    The bus calls ``sink.append(event)`` with a :class:`~dhc.models.Event`;
-    the Messenger calls ``sink.append(message)`` with a
-    :class:`~dhc.models.Message`; the RoomManager calls
-    ``sink.append(("room_message", room_name, message))``. This sink
-    translates each into a boundary-log record, mapping the runtime's event
-    kinds onto the five boundary kinds (spawned/settled/cancelled/published/
-    messaged) and linking settled/published records to their causal spawned
-    record via ``causal_id`` so the trail reconstructs as a DAG.
-    """
-
-    def __init__(self, log: BoundaryEventLog) -> None:
-        self._log = log
-        #: child_id -> causal id of the spawned record that created it.
-        self._spawned: dict[str, str] = {}
-        self._lock = threading.Lock()
-
-    def append(self, obj: Any) -> None:
-        if isinstance(obj, Event):
-            self._append_event(obj)
-        elif isinstance(obj, Message):
-            self._append_message(obj)
-        elif (
-            isinstance(obj, tuple)
-            and len(obj) == 3
-            and obj[0] == "room_message"
-        ):
-            _, room_name, message = obj
-            self._append_room(room_name, message)
-
-    def _append_event(self, event: Event) -> None:
-        kind = _BOUNDARY_KIND.get(event.kind)
-        if kind is None:
-            return  # not a boundary crossing (turn_*, crash, escalation, ...)
-        causal_id = event.causal_id
-        if kind == "spawned":
-            child_id = event.payload.get("child_id")
-            causal_id = f"spawned:{event.agent_id}:{child_id}"
-            with self._lock:
-                self._spawned[child_id] = causal_id
-        elif kind in ("settled", "published"):
-            with self._lock:
-                causal_id = self._spawned.get(event.agent_id)
-        with self._lock:
-            self._log.append(
-                kind, event.agent_id, causal_id=causal_id, payload=event.payload
-            )
-
-    def _append_message(self, message: Message) -> None:
-        with self._lock:
-            self._log.append(
-                "messaged",
-                message.sender_id,
-                causal_id=None,
-                payload={
-                    "recipient_id": message.recipient_id,
-                    "body": message.body,
-                },
-            )
-
-    def _append_room(self, room_name: str, message: Message) -> None:
-        with self._lock:
-            self._log.append(
-                "messaged",
-                message.sender_id,
-                causal_id=None,
-                payload={"room": room_name, "body": message.body},
-            )
+from .agent.tools import register_default_tools
 
 
 class _WiredBus:
@@ -228,50 +154,6 @@ class _ReplEngineAdapter:
         raise TurnError(reason)
 
 
-class _StoreAdapter:
-    """Adapt the ArtifactStore to the in-code ``publish(h, s, r)`` contract.
-
-    The in-code surface calls ``store.publish(headline, summary, report)``
-    (contract §1); the real :class:`~dhc.artifact_store.ArtifactStore` has
-    ``put(artifact)``. This adapter builds the content-addressed
-    :class:`~dhc.models.Artifact` and stores it, then exposes the read tiers
-    for consumers (progressive disclosure, INFO-006).
-    """
-
-    def __init__(self, store: ArtifactStore) -> None:
-        self._store = store
-
-    def publish(self, headline: str, summary: str, report: Any) -> Artifact:
-        artifact = Artifact(headline=headline, summary=summary, report=report)
-        self._store.put(artifact)
-        return artifact
-
-    def get(self, artifact_id: str) -> Artifact:
-        return self._store.get(artifact_id)
-
-    def exists(self, artifact_id: str) -> bool:
-        return self._store.exists(artifact_id)
-
-    def get_headline(self, artifact_id: str) -> str:
-        return self._store.get_headline(artifact_id)
-
-    def get_summary(self, artifact_id: str) -> str:
-        return self._store.get_summary(artifact_id)
-
-    def get_report(self, artifact_id: str) -> object:
-        return self._store.get_report(artifact_id)
-
-    def list_ids(self) -> list:
-        return self._store.list_ids()
-
-    def count(self) -> int:
-        return self._store.count()
-
-    def path_for(self, artifact_id: str) -> Path:
-        """Return the on-disk path of the artifact's report body."""
-        return self._store._report_path(artifact_id)
-
-
 class _BoundMessenger:
     """A per-agent facade over the shared Messenger (INFO-015)."""
 
@@ -306,14 +188,14 @@ def _extend_namespace(
     The core :class:`~dhc.runtime.Runtime` builds the slim base namespace
     (agent, spawn, complete, fail, cancel, status, result, tool, bash,
     await_, poll, children_of). This composition root installs the artifact
-    store and communication channels as REPL tools via
-    :func:`dhc.tools.register_default_tools`, plus the driver factory
+    store (``dhc.tooling``) and communication channels as REPL tools via
+    :func:`dhc.tooling.register_artifact_tools` and
+    :func:`dhc.agent.tools.register_default_tools`, plus the driver factory
     (MockDriver / driver_from_settings) that action blocks use to spawn
     children.
     """
     register_default_tools(
         runtime,
-        store=store,
         bus=bus,
         channels={
             # The messenger is a per-agent facade: bind it to the calling
@@ -324,6 +206,10 @@ def _extend_namespace(
             "questions": questions,
         },
     )
+    # The store tools (publish, read_artifact, archive, list_artifacts) come
+    # from the tooling layer (decision 0014) — same namespace-wrapping
+    # mechanics, separate module, so the framework core stays store-unaware.
+    register_artifact_tools(runtime, store=store, bus=bus)
     original = runtime._build_namespace
 
     def build(agent: Any) -> dict:
@@ -366,13 +252,16 @@ def build_runtime(
     as ``runtime.messenger``, ``runtime.rooms``, ``runtime.escalations``,
     ``runtime.questions``; the operator door as ``runtime.operator``; the
     dispatcher as ``runtime.dispatcher``; the boundary log as
-    ``runtime.boundary_log``.
+    ``runtime.boundary_log``; the store adapter as ``runtime.artifact_store``
+    (raw store as ``runtime.artifact_store_real``) — wiring-level
+    decorations attached after construction, the core never reads them.
 
     The artifact store and channels are installed into the agent namespace as
     REPL tools (publish, read_artifact, archive, list_artifacts, room,
     messenger, escalate, ask_operator, post, channel_read, list_tools) by
-    :func:`dhc.tools.register_default_tools` — the composition root, keeping
-    the core (runtime + eventbus) slim.
+    :func:`dhc.tooling.register_artifact_tools` and
+    :func:`dhc.agent.tools.register_default_tools` — the composition root,
+    keeping the core (runtime + eventbus) slim and store-unaware.
 
     *settings* defaults to the process-wide :func:`~dhc.config.get_settings`;
     *artifact_root* overrides the settings' artifact root; *mock* is kept for
@@ -387,15 +276,14 @@ def build_runtime(
     )
     store = ArtifactStore(root)
     boundary_log = BoundaryEventLog(root)
-    sink = _BoundarySink(boundary_log)
+    sink = BoundarySink(boundary_log)
     bus = EventBus(sink=sink)
     dispatcher = CompletionDispatcher()
-    store_adapter = _StoreAdapter(store)
+    store_adapter = StoreAdapter(store)
 
     runtime = Runtime(
         engine=None,  # wired below (needs the runtime for agent resolution)
         event_bus=_WiredBus(bus, dispatcher),
-        artifact_store=store_adapter,
         settings=settings,
     )
     raw_engine = ReplEngine()
@@ -420,6 +308,10 @@ def build_runtime(
     runtime.dispatcher = dispatcher
     runtime.boundary_log = boundary_log
     runtime.bus = bus
+    # The store is operator tooling (decision 0014): attached here as a
+    # wiring-level decoration (adapter + raw store) — the core Runtime class
+    # neither defines nor reads these attributes.
+    runtime.artifact_store = store_adapter
     runtime.artifact_store_real = store
     runtime.operator = Operator(runtime=runtime, question_channel=questions)
     runtime.mock = mock

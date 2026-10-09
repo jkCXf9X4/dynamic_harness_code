@@ -49,7 +49,6 @@ def _register_agent(rt, agent_id="a1", requirement="r"):
         id=agent_id,
         requirement=requirement,
         runtime=rt,
-        artifact_store=rt.artifact_store,
     )
     rt._agents[agent_id] = agent
     rt._handles[agent_id] = AgentHandle(agent_id, rt)

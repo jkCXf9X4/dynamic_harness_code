@@ -11,11 +11,13 @@ namespace build, the public supervision API, and thin method wrappers over
 every moved name — the re-export seam — so existing imports (including
 tests importing privates) keep working.
 
-All collaborators (engine, event bus, artifact store, settings) are injected
+All collaborators (engine, event bus, settings) are injected
 via the constructor — duck-typed, never imported from sibling modules at
 module level. When a collaborator is omitted, a lightweight in-memory default
 is created so the runtime is usable standalone; the real modules are wired by
-the integration agent later.
+the integration agent later. The runtime is store-unaware (decision 0014):
+artifact persistence is operator tooling (``dhc.tooling``) composed in by the
+composition root, not a core collaborator.
 """
 
 from __future__ import annotations
@@ -31,7 +33,6 @@ from ..llm.fabrication import DEFAULT_RUNNER_SOURCE, fabrication_kit
 from ..data.models import (
     TERMINAL_STATES,
     AgentStatus,
-    Artifact,
     Completion,
     CompletionLog,
     Event,
@@ -123,24 +124,6 @@ class _MemoryBus:
             return list(self._queues.get(topic, []))
 
 
-class _MemoryStore:
-    """A simple in-memory artifact store (content-addressed)."""
-
-    def __init__(self) -> None:
-        self._artifacts: dict[str, Artifact] = {}
-        self._lock = threading.Lock()
-
-    def publish(self, headline: str, summary: str, report: Any) -> Artifact:
-        artifact = Artifact(headline=headline, summary=summary, report=report)
-        with self._lock:
-            self._artifacts[artifact.id] = artifact
-        return artifact
-
-    def get(self, artifact_id: str) -> Optional[Artifact]:
-        with self._lock:
-            return self._artifacts.get(artifact_id)
-
-
 # --------------------------------------------------------------------------- #
 # Runtime
 # --------------------------------------------------------------------------- #
@@ -170,14 +153,10 @@ class Runtime:
         self,
         engine: Any = None,
         event_bus: Any = None,
-        artifact_store: Any = None,
         settings: Any = None,
     ) -> None:
         self.engine = engine if engine is not None else _MemoryEngine()
         self.event_bus = event_bus if event_bus is not None else _MemoryBus()
-        self.artifact_store = (
-            artifact_store if artifact_store is not None else _MemoryStore()
-        )
         self.settings = settings
 
         self._agents: dict[str, Agent] = {}
@@ -274,7 +253,6 @@ class Runtime:
                 acceptance=tuple(acceptance),
                 parent_id=parent_id,
                 runtime=self,
-                artifact_store=self.artifact_store,
             )
             self._agents[agent_id] = agent
             self._handles[agent_id] = AgentHandle(agent_id, self)
@@ -451,9 +429,10 @@ class Runtime:
         """Build the in-code namespace for one turn from the Agent.
 
         CORE-ONLY names (the architectural goal: core = runtime + eventbus).
-        The artifact store and communication channels are REPL tools composed
-        in by :func:`dhc.tools.register_default_tools` (via wiring.py), not
-        part of the core namespace.
+        The artifact store (``dhc.tooling``) and communication channels are
+        REPL tools composed in by ``dhc.agent.tools.register_default_tools``
+        and ``dhc.tooling.register_artifact_tools`` (via wiring.py), not part
+        of the core namespace.
         """
         ns = {
             "agent": agent,

@@ -1,4 +1,4 @@
-"""Tests for dhc.artifact_store: ArtifactStore and BoundaryEventLog.
+"""Tests for dhc.tooling.artifact_store: ArtifactStore and BoundaryEventLog.
 
 All tests use pytest's tmp_path fixture for the store root — nothing is ever
 written into the repository tree.
@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from dhc.data.artifact_store import BOUNDARY_EVENT_KINDS, ArtifactStore, BoundaryEventLog
+from dhc.tooling import BOUNDARY_EVENT_KINDS, ArtifactStore, BoundaryEventLog
 from dhc.errors import ArtifactNotFoundError
 from dhc.data.models import Artifact
 

@@ -5,9 +5,10 @@ and :class:`AgentHandle`, the lightweight task handle a parent holds for
 await/poll/cancel/status/result.
 
 The runtime delivers this surface into each agent's REPL namespace; agent code
-never touches the runtime directly. All collaborators (runtime, artifact
-store, event bus) are injected by the runtime — this module imports no sibling
-modules at module level (constructor injection only).
+never touches the runtime directly. The only collaborator is the runtime
+itself, injected by the constructor — this module imports no sibling modules
+at module level. Artifact publication is a composed namespace tool
+(``dhc.tooling``), not an agent method (decision 0014).
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from typing import Any, Callable, Optional
 
 from ..data.models import (
     AgentStatus,
-    Artifact,
     Result,
     ToolOutput,
     is_terminal,
@@ -116,7 +116,6 @@ class Agent:
         acceptance: tuple = (),
         parent_id: Optional[str] = None,
         runtime: Any = None,
-        artifact_store: Any = None,
         created_ts: Optional[float] = None,
     ) -> None:
         self.id = id
@@ -137,9 +136,8 @@ class Agent:
         # The most recent result produced by a turn (complete/fail/cancel).
         # Runtime-owned: reset before each turn, read after it.
         self._last_result: Optional[Result] = None
-        # Runtime-owned collaborators (injected; duck-typed).
+        # Runtime-owned collaborator (injected; duck-typed).
         self._runtime = runtime
-        self._artifact_store = artifact_store
         # Token/cost accumulators (IMP-004). Written only by
         # ``record_usage`` — the single accumulation point, called from the
         # driver seam; read by the state view-model (``build_agent_tree``).
@@ -231,14 +229,6 @@ class Agent:
         # Runtime.spawn already registered the child on this agent's children
         # list (parent_id was passed); do not append again.
         return child.get()
-
-    # -- artifacts -----------------------------------------------------------
-
-    def publish(self, headline: str, summary: str, report: Any) -> Artifact:
-        """Persist a finding and return its content-addressed artifact."""
-        if self._artifact_store is None:
-            raise RuntimeError("agent has no artifact store")
-        return self._artifact_store.publish(headline, summary, report)
 
     # -- results -------------------------------------------------------------
 

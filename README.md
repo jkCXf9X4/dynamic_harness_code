@@ -59,9 +59,10 @@ operator (root door) ──> Runtime ──> per-agent worker thread
 ```
 
 `dhc.wiring.build_runtime(settings=None, mock=False)` wires the real modules
-together and returns a ready `Runtime` with the channels exposed
-(`runtime.messenger`, `runtime.rooms`, `runtime.escalations`,
-`runtime.questions`, `runtime.operator`, `runtime.boundary_log`).
+together and returns a ready `Runtime` with the channels and the operator
+tooling exposed (`runtime.messenger`, `runtime.rooms`, `runtime.escalations`,
+`runtime.questions`, `runtime.operator`, `runtime.boundary_log`,
+`runtime.artifact_store`).
 
 ## Module map
 
@@ -70,7 +71,8 @@ together and returns a ready `Runtime` with the channels exposed
 | `models.py` | `Artifact`, `Result`, `Event`, `Completion`, `ToolOutput`, `Room`, lifecycle states |
 | `errors.py` | the `DhcError` hierarchy |
 | `config.py` | `Settings` (env + `.env`), `get_settings()` |
-| `artifact_store.py` | content-addressed `ArtifactStore`, `BoundaryEventLog` (INFO-049) |
+| `tooling/artifact_store.py` | content-addressed `ArtifactStore`, `BoundaryEventLog` (INFO-049) — operator tooling (0014) |
+| `tooling/artifact_tools.py` | the store's REPL tools: `publish`, `read_artifact`, `archive`, `list_artifacts` |
 | `repl.py` | per-agent persistent `ReplEngine` (INFO-050) |
 | `event_stream.py` | `EventStream`, `EventBus`, `CompletionDispatcher` (INFO-046/047/048) |
 | `agent.py` | the in-code surface: `Agent`, `AgentHandle`, `bash`, `room` |

@@ -1,26 +1,28 @@
-"""The tools layer: artifact store and communication channels as REPL tools.
+"""The tools layer: communication channels and events as REPL tools.
 
 The architectural goal (refactor scoping brief §c6/§c8): the CORE is only
 ``dhc/runtime.py`` + ``dhc/event_stream.py``. The artifact store and the
 communication channels are *not* core collaborators — they are REPL-executed
 Python tools: namespace callables developed separately from the core and
-installed by :func:`register_default_tools`.
+installed by registration functions. The channel and events tools live here
+(framework-side); the artifact store tools (publish, read_artifact, archive,
+list_artifacts) live in :mod:`dhc.tooling.artifact_tools` — the store itself
+is operator tooling, not framework (decision 0014).
 
 Tools receive a lightweight :class:`ToolContext` (agent_id + duck-typed
 collaborators), never the :class:`~dhc.agent.Agent` itself — mirroring the
 reference project's ``core/tools/`` separation. The runtime stays slim: its
 base namespace contains only core names; everything else is composed in by
-``dhc/wiring.py`` via this module.
+``dhc/wiring.py`` via the registration functions.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 from ..errors import ChannelError
-from ..data.models import Artifact, Event, EventKind, Message, Room
+from ..data.models import Event, Message, Room
 
 
 # --------------------------------------------------------------------------- #
@@ -36,18 +38,18 @@ class ToolContext:
     (tests, REPL sessions) as well as fully wired:
 
     * ``runtime`` — anything exposing the supervision surface the tool needs
-      (e.g. ``children_of``, ``get``); may be ``None`` for store-only tools.
-    * ``store`` — anything with ``publish(headline, summary, report)``,
-      ``get(artifact_id)``, ``get_headline``/``get_summary``/``get_report``,
-      ``list_ids()``, and ``exists(artifact_id)``.
+      (e.g. ``children_of``, ``get``); may be ``None``.
     * ``bus`` — anything with ``publish(event)`` (the event bus).
     * ``channels`` — a dict of named channel facades: ``messenger``,
       ``rooms``, ``escalations``, ``questions``.
+
+    The artifact store deliberately has NO slot here (decision 0014): the
+    store tools live in ``dhc.tooling.artifact_tools`` with their own
+    context.
     """
 
     agent_id: str
     runtime: Any = None
-    store: Any = None
     bus: Any = None
     channels: dict[str, Any] = field(default_factory=dict)
 
@@ -77,77 +79,6 @@ class ToolContext:
 # --------------------------------------------------------------------------- #
 # Tool implementations (all take/return simple values)
 # --------------------------------------------------------------------------- #
-
-
-def _publish(ctx: ToolContext, headline: str, summary: str, report: Any) -> Artifact:
-    """Persist a finding and emit the ``artifact_published`` boundary event.
-
-    Wraps ``store.put`` (the raw :class:`~dhc.artifact_store.ArtifactStore`
-    contract); also accepts the adapter-style ``store.publish(h, s, r)``
-    contract for duck-typed stores.
-    """
-    if ctx.store is None:
-        raise RuntimeError("no artifact store wired into the tools layer")
-    if hasattr(ctx.store, "put"):
-        artifact = Artifact(headline=headline, summary=summary, report=report)
-        ctx.store.put(artifact)
-    else:
-        artifact = ctx.store.publish(headline, summary, report)
-    if ctx.bus is not None:
-        ctx.bus.publish(
-            Event(
-                kind=EventKind.artifact_published,
-                agent_id=ctx.agent_id,
-                payload={"artifact_id": artifact.id},
-            )
-        )
-    return artifact
-
-
-def _read_artifact(
-    ctx: ToolContext, artifact_id: str, level: str = "summary"
-) -> str:
-    """Progressive disclosure: headline -> summary -> report tiers."""
-    if ctx.store is None:
-        raise RuntimeError("no artifact store wired into the tools layer")
-    if level == "headline":
-        return ctx.store.get_headline(artifact_id)
-    if level == "summary":
-        return ctx.store.get_summary(artifact_id)
-    if level in ("report", "full", "raw"):
-        report = ctx.store.get_report(artifact_id)
-        if isinstance(report, str):
-            return report
-        import json
-
-        return json.dumps(report, ensure_ascii=False, sort_keys=True, default=str)
-    raise ValueError(
-        f"unknown disclosure level {level!r}; expected headline|summary|report"
-    )
-
-
-def _archive(ctx: ToolContext, artifact_id: str) -> str:
-    """Return the on-disk path of the stored artifact's report body."""
-    if ctx.store is None:
-        raise RuntimeError("no artifact store wired into the tools layer")
-    if not ctx.store.exists(artifact_id):
-        raise ChannelError(f"no artifact with id {artifact_id!r}")
-    path = getattr(ctx.store, "path_for", None)
-    if callable(path):
-        return str(path(artifact_id))
-    # Duck-typed fallback: the raw ArtifactStore exposes its root and the
-    # report layout (root/artifacts/<id>.json).
-    root = getattr(ctx.store, "_root", None) or getattr(ctx.store, "root", None)
-    if root is not None:
-        return str(Path(root) / "artifacts" / f"{artifact_id}.json")
-    return artifact_id
-
-
-def _list_artifacts(ctx: ToolContext) -> list[str]:
-    """Return all stored artifact ids (stable order)."""
-    if ctx.store is None:
-        raise RuntimeError("no artifact store wired into the tools layer")
-    return list(ctx.store.list_ids())
 
 
 def _room(ctx: ToolContext, name: str) -> Room:
@@ -194,8 +125,17 @@ def _ask_operator(ctx: ToolContext, question: str) -> Event:
 
 
 def _list_tools(ctx: ToolContext) -> list[str]:
-    """Return the names of the installed tools."""
-    return sorted(_TOOL_NAMES)
+    """Return the names of the installed tools.
+
+    Reads the runtime's accumulated ``_installed_tool_names`` — the union of
+    the names every registration function (this one and
+    ``dhc.tooling.register_artifact_tools``) has contributed — so a runtime
+    without the store tooling does not advertise ``publish``.
+    """
+    names = getattr(ctx.runtime, "_installed_tool_names", None)
+    if names is None:
+        names = _TOOL_NAMES
+    return sorted(names)
 
 
 def _events(ctx: ToolContext) -> list:
@@ -220,12 +160,11 @@ def _events(ctx: ToolContext) -> list:
 # --------------------------------------------------------------------------- #
 
 #: The canonical tool names installed by :func:`register_default_tools`.
+#: (The four artifact store tools are a separate set, installed by
+#: ``dhc.tooling.register_artifact_tools``; ``list_tools`` reports the
+#: union of whatever is actually installed on the runtime.)
 _TOOL_NAMES: frozenset[str] = frozenset(
     {
-        "publish",
-        "read_artifact",
-        "archive",
-        "list_artifacts",
         "room",
         "messenger",
         "escalate",
@@ -246,14 +185,6 @@ def _bind(ctx: ToolContext) -> dict[str, Callable[..., Any]]:
     tool objects.
     """
     return {
-        "publish": lambda headline, summary, report: _publish(
-            ctx, headline, summary, report
-        ),
-        "read_artifact": lambda artifact_id, level="summary": _read_artifact(
-            ctx, artifact_id, level
-        ),
-        "archive": lambda artifact_id: _archive(ctx, artifact_id),
-        "list_artifacts": lambda: _list_artifacts(ctx),
         "room": lambda name: _room(ctx, name),
         "messenger": ctx.messenger,
         "escalate": lambda requirement, reason: _escalate(
@@ -269,7 +200,6 @@ def _bind(ctx: ToolContext) -> dict[str, Callable[..., Any]]:
 
 def register_default_tools(
     runtime: Any,
-    store: Any = None,
     bus: Any = None,
     channels: Optional[dict[str, Any]] = None,
 ) -> None:
@@ -280,7 +210,9 @@ def register_default_tools(
     :class:`ToolContext`. The core runtime itself is untouched: it keeps its
     slim base namespace; the tools are composed in here.
 
-    *store* is duck-typed (``publish``/``get``/``get_headline``/...);
+    The artifact store tools are NOT installed here (decision 0014) — they
+    come from ``dhc.tooling.register_artifact_tools``.
+
     *bus* is duck-typed (``publish(event)``); *channels* maps names to
     channel facades (``messenger``, ``rooms``, ``escalations``, ``questions``).
     A channel value may be a plain object or a callable ``(agent_id) -> bound
@@ -289,6 +221,9 @@ def register_default_tools(
     """
     channels = dict(channels or {})
     original = getattr(runtime, "_build_namespace", None)
+    names = set(getattr(runtime, "_installed_tool_names", ()))
+    names.update(_TOOL_NAMES)
+    runtime._installed_tool_names = names
 
     def build(agent: Any) -> dict:
         ns = original(agent) if original is not None else {}
@@ -298,7 +233,6 @@ def register_default_tools(
         ctx = ToolContext(
             agent_id=agent.id,
             runtime=runtime,
-            store=store,
             bus=bus,
             channels=resolved,
         )

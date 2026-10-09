@@ -1,15 +1,17 @@
-"""Tests for the tools layer: artifact store and channels as REPL tools.
+"""Tests for the tools layer: channels and events as REPL tools.
 
 The architectural goal: the CORE is only runtime + eventbus; the artifact
 store and communication channels are REPL-executed Python tools installed by
-:func:`dhc.tools.register_default_tools`. These tests verify:
+registration functions — ``dhc.agent.tools.register_default_tools`` for the
+channel/events tools and ``dhc.tooling.register_artifact_tools`` for the
+store tools (decision 0014). These tests verify:
 
 * registration installs all callables into the runtime namespace
 * publish -> read_artifact roundtrip with progressive disclosure
 * publish emits the ``artifact_published`` event
 * room / messenger / escalate / ask_operator work through the tools layer
 * list_tools lists the installed tools
-* the core namespace has no publish/room (they come from tools)
+* the core namespace has no publish/room (they come from the registrations)
 """
 
 import sys
@@ -19,7 +21,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dhc.data.artifact_store import ArtifactStore  # noqa: E402
+from dhc.tooling import ArtifactStore  # noqa: E402
+from dhc.tooling.artifact_tools import register_artifact_tools  # noqa: E402
 from dhc.ui.communication import (  # noqa: E402
     EscalationChannel,
     Messenger,
@@ -80,10 +83,9 @@ def _wired_runtime(tmp_path):
     rooms = RoomManager(bus)
     escalations = EscalationChannel(bus)
     questions = OperatorQuestionChannel(bus)
-    runtime = Runtime(artifact_store=store, event_bus=bus)
+    runtime = Runtime(event_bus=bus)
     register_default_tools(
         runtime,
-        store=store,
         bus=bus,
         channels={
             "messenger": lambda agent_id: _BoundMessenger(messenger, agent_id),
@@ -92,6 +94,7 @@ def _wired_runtime(tmp_path):
             "questions": questions,
         },
     )
+    register_artifact_tools(runtime, store=store, bus=bus)
     return runtime, store, bus, messenger, rooms, escalations, questions
 
 
@@ -148,7 +151,8 @@ def test_core_namespace_has_no_publish_or_room(tmp_path):
     ns = _namespace(runtime)
     for name in CORE_NAMES:
         assert name in ns, f"core name {name!r} missing"
-    # The tools are present only because register_default_tools added them.
+    # The tools are present only because the registration functions added
+    # them (register_default_tools + register_artifact_tools).
     assert "publish" in ns
     assert "room" in ns
 
@@ -170,16 +174,23 @@ def _fake_agent():
 
 
 def test_tool_context_duck_typed_fields():
-    ctx = ToolContext(agent_id="a1", runtime=object(), store=object())
+    ctx = ToolContext(agent_id="a1", runtime=object())
     assert ctx.agent_id == "a1"
     assert ctx.runtime is not None
-    assert ctx.store is not None
     assert ctx.bus is None
     assert ctx.channels == {}
     assert ctx.messenger is None
     assert ctx.rooms is None
     assert ctx.escalations is None
     assert ctx.questions is None
+
+
+def test_tool_context_has_no_store_slot():
+    """The framework ToolContext carries no store (decision 0014)."""
+    import dataclasses
+
+    fields = {f.name for f in dataclasses.fields(ToolContext)}
+    assert "store" not in fields
 
 
 # --------------------------------------------------------------------------- #

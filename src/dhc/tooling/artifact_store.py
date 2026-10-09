@@ -1,10 +1,14 @@
-"""Immutable, content-addressed artifact store and boundary event log for dhc.
+"""Immutable, content-addressed artifact store and boundary event log.
+
+Operator tooling (decision 0014): the framework core (``dhc.agent``) knows
+artifacts only as opaque ids and the ``artifact_published`` event kind —
+everything that *persists* them lives here.
 
 Artifacts (INFO-006) are the durable medium of the runtime: every finding,
-result, and action's code persists as an immutable, content-addressed artifact.
-Consumers pull progressive-disclosure tiers on demand — ``headline`` ->
-``summary`` -> ``report`` — and handoffs between siblings are addressed by
-content hash so they are safe to repeat and verify.
+result, and action's code persists as an immutable, content-addressed
+artifact. Consumers pull progressive-disclosure tiers on demand —
+``headline`` -> ``summary`` -> ``report`` — and handoffs between siblings are
+addressed by content hash so they are safe to repeat and verify.
 
 Storage layout under ``settings.artifact_root``::
 
@@ -28,7 +32,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..errors import ArtifactNotFoundError
-from .models import Artifact
+from ..data.models import Artifact
 
 #: The five boundary event kinds (INFO-049).
 BOUNDARY_EVENT_KINDS: frozenset[str] = frozenset(

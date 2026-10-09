@@ -17,10 +17,11 @@ src/dhc/
 ├── cli.py           # `dhc` console entry point — thin chat-only TUI (INFO-028)
 ├── wiring.py        # composition root: build_runtime() wires all real modules
 ├── errors.py        # cross-cutting error hierarchy (DhcError + subclasses)
-├── agent/           # agent-controlled execution core
+├── agent/           # agent-controlled execution core (store-unaware, 0014)
 ├── llm/             # LLM provider plumbing
 ├── ui/              # operator surface
-├── data/            # schemas, config, persistence
+├── data/            # schemas, config
+├── tooling/         # operator tooling: artifact store, boundary log, store tools (0014)
 └── benchmark/       # failable-verifier benchmark suite
 ```
 
@@ -31,7 +32,7 @@ src/dhc/
 | `runtime.py` | The runtime orchestrator: agent registry, thread-per-agent placement, worker loop (driver → turn → settle), at-most-once completion dispatch, cancellation |
 | `repl.py` | Per-agent persistent REPL engine (INFO-050): one private workspace per agent, serialized turns, crash containment |
 | `agent.py` | The in-code agent surface: `Agent` (what action blocks see as `agent`) and `AgentHandle` (the parent's await/poll/cancel handle) |
-| `tools.py` | The tools layer: artifact store + communication channels exposed as REPL namespace callables |
+| `tools.py` | The tools layer: communication channels + events exposed as REPL namespace callables (the store tools live in `tooling/`) |
 | `state.py` | Run-overview persistence for manual review: `agent_tree.json`, `stats.json`, `agents.txt`, `events.jsonl` |
 | `checkpoint.py` | Per-agent checkpoint persistence (peripheral wrapper, best-effort save/restore) |
 | `event_stream.py` | Event stream, runtime-owned event bus, and completion dispatcher (persist-before-execute, at-most-once) |
@@ -53,14 +54,25 @@ src/dhc/
 | `operator.py` | The single human↔mesh door (INFO-017): chat loop, mid-turn steering, operator questions |
 | `communication.py` | Peer channels on the event bus: `Messenger`, `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel` |
 
-### data/ — schemas, config, persistence
+### data/ — schemas, config
 
 | module | what it is |
 |---|---|
 | `models.py` | Core pydantic v2 value objects: `Artifact`, `Result`, `Event`, `Completion`, `Room`, `Turn`, … |
 | `config.py` | Runtime configuration: env/`.env` `Settings` singleton + layered `harness.json` discovery (XDG → cwd → explicit) |
-| `artifact_store.py` | Immutable content-addressed artifact store + append-only boundary event log |
 | `trace.py` | Per-agent `trace.jsonl` persistence (peripheral wrapper) |
+
+### tooling/ — operator tooling (decision 0014)
+
+The framework core is store-unaware: it knows artifacts only as opaque ids
+and the `artifact_published` event. Everything that persists them lives here,
+instantiated only by the composition root.
+
+| module | what it is |
+|---|---|
+| `artifact_store.py` | Immutable content-addressed artifact store + append-only boundary event log |
+| `artifact_tools.py` | The store's REPL tools (`publish`, `read_artifact`, `archive`, `list_artifacts`) + `register_artifact_tools` |
+| `adapters.py` | `StoreAdapter` (`put` → `publish(h, s, r)` + read tiers) and `BoundarySink` (events → boundary log) |
 
 ### benchmark/ — evaluation
 

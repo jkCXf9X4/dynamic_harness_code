@@ -16,11 +16,11 @@ documented test and demo path; the real LLM path activates only when
 
 Layout (src layout, REV 2):
     agent/    agent-controlled execution core (runtime, repl, agent, tools,
-              state, checkpoint, event_stream)
+              state, checkpoint, event_stream) — store-unaware (0014)
     llm/      provider plumbing (llm, driver, prompts, fabrication)
     ui/       operator surface (terminal, operator, communication)
-    data/     schemas, config, persistence (models, config, artifact_store,
-              trace)
+    data/     schemas, config (models, config, trace)
+    tooling/  operator tooling: artifact store, boundary log, store tools
     benchmark/  unchanged subpackage
     cli.py, wiring.py, errors.py  top-level (entry point, composition root,
               cross-cutting error hierarchy)
@@ -33,11 +33,11 @@ from . import (
     data,
     errors,
     llm,
+    tooling,
     ui,
     wiring,
 )
 from .agent.agent import Agent, AgentHandle, ToolResult, bash, room
-from .data.artifact_store import BOUNDARY_EVENT_KINDS, ArtifactStore, BoundaryEventLog
 from .ui.communication import (
     EscalationChannel,
     Messenger,
@@ -89,6 +89,7 @@ __all__ = [
     "data",
     "errors",
     "llm",
+    "tooling",
     "ui",
     "wiring",
     # errors
@@ -120,10 +121,6 @@ __all__ = [
     "ToolResult",
     "bash",
     "room",
-    # artifact store
-    "ArtifactStore",
-    "BoundaryEventLog",
-    "BOUNDARY_EVENT_KINDS",
     # event stream
     "EventStream",
     "EventBus",
