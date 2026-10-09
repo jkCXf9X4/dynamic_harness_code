@@ -93,12 +93,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="LLM model name (used by the real driver; ignored in mock mode)",
     )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=None,
-        help="LLM call timeout in seconds (used by the real driver)",
-    )
+    # NOTE (H-02): --timeout was removed — the chat CLI always runs the
+    # deterministic driver (driver=None), so a per-call LLM timeout had no
+    # consumer. The real driver's timeout is configured via
+    # llm.call_timeout_seconds in harness.json (or DHC_LLM_TIMEOUT_SECONDS).
     parser.add_argument(
         "--inspect",
         default=None,

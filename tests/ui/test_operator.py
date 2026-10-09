@@ -331,6 +331,18 @@ def test_cli_main_importable_without_api_key():
     args = parser.parse_args(["--mock"])
     assert args.mock is True
 
+
+def test_cli_timeout_flag_removed():
+    """H-02: --timeout is gone — the chat CLI always runs the deterministic
+    driver, so a per-call LLM timeout had no consumer. The real driver's
+    timeout is configured via llm.call_timeout_seconds in harness.json."""
+    import dhc.cli as cli
+
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--timeout", "30"])
+    assert "timeout" not in parser.format_help()
+
 # --------------------------------------------------------------------------- #
 # IMP-001 Step 5: operator.inspect — read-only window into a live workspace
 # --------------------------------------------------------------------------- #

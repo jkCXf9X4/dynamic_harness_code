@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from ..data.config import get_settings, merge_api_key
+from ..data.config import get_settings, load_config, merge_api_key
 from .operator import Operator
 from ..agent.state import StateWriter, build_agent_tree, build_stats, render_text_tree
 from ..wiring import build_runtime
@@ -439,7 +439,8 @@ class Terminal:
 # --------------------------------------------------------------------------- #
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser (exposed for tests)."""
     parser = argparse.ArgumentParser(
         prog="dhc.terminal",
         description="Prompt-only interactive terminal for the dhc agent harness.",
@@ -459,20 +460,29 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Use the deterministic mock driver (no API key needed).",
     )
-    parser.add_argument("--config", metavar="PATH", help="Path to harness.json")
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Path to harness.json (highest-precedence config layer; "
+        "replaces the ./harness.json discovery layer)",
+    )
     parser.add_argument("--model", help="LLM model name")
     parser.add_argument("--base-url", help="LLM API base URL")
     parser.add_argument("--api-key", help="LLM API key")
-    return parser.parse_args(argv)
+    return parser
+
+
+def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
 
 
 def _apply_provider_overrides(settings: Any, args: argparse.Namespace) -> None:
     """Apply --model/--base-url/--api-key to the settings' provider config.
 
-    The settings object is a plain dataclass; ``provider`` is a derived
-    property over ``config.llm``. Overrides are applied by copying the
-    provider config with the CLI values and stashing it on the settings
-    instance so ``settings.provider`` reflects them.
+    The settings object is a plain dataclass; ``provider`` is a read-only
+    derived property over ``config.llm``. Overrides are applied by copying
+    ``config.llm`` with the CLI values and stashing the new config on the
+    settings instance so ``settings.provider`` reflects them.
     """
     if not (args.model or args.base_url or args.api_key):
         return
@@ -484,7 +494,9 @@ def _apply_provider_overrides(settings: Any, args: argparse.Namespace) -> None:
         updates["base_url"] = args.base_url
     if args.api_key:
         updates["api_key"] = args.api_key
-    settings.provider = provider.model_copy(update=updates)  # type: ignore[attr-defined]
+    settings.config = settings.config.model_copy(
+        update={"llm": provider.model_copy(update=updates)}
+    )
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -496,9 +508,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     :func:`dhc.wiring.build_runtime` with ``mock=not has_key`` (the mock path
     is chosen by the driver factory when no API key is present); a
     :class:`~dhc.state.StateWriter` is attached at the artifact root's parent.
+    ``--config PATH`` loads an explicit ``harness.json`` as the
+    highest-precedence config layer (see :func:`dhc.data.config.load_config`).
     """
     args = _parse_args(argv)
     settings = get_settings()
+    # --config: load the explicit harness.json as the highest-precedence
+    # config layer (XDG base -> explicit path) and install it on the
+    # settings so settings.provider / settings.config.safety reflect it.
+    # Without --config the settings keep the config discovered at
+    # get_settings() time (XDG -> ./harness.json).
+    if args.config is not None:
+        settings.config = load_config(args.config)
     _apply_provider_overrides(settings, args)
 
     has_key = bool(args.api_key or merge_api_key())
