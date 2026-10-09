@@ -251,7 +251,16 @@ def make_settle_completed(runtime: Any, agent_id: str) -> Callable[[], None]:
 def make_checkpoint(
     engine: Any, agent_id: str, state: dict
 ) -> Callable[..., int]:
-    """Record a workspace snapshot in the context's checkpoint log."""
+    """Record a workspace snapshot in the context's checkpoint log.
+
+    This is the **agent's own** checkpoint mechanism (decision 0012, H-06):
+    in-workspace, in-memory, ordinary data the agent reads and writes freely.
+    It is distinct from the operator's on-disk ``CheckpointStore``
+    (``dhc.agent.checkpoint``), which is the operator's resumability
+    mechanism surfaced via the terminal's ``/resume`` and is deliberately
+    outside the agent's context. The two are independent; see
+    ``decisions/0012-h06-checkpoint-split.md``.
+    """
 
     def checkpoint(note: str = "", done: tuple = ()) -> int:
         log = state.setdefault("checkpoints", [])
