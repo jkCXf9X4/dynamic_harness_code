@@ -211,7 +211,16 @@ class Terminal:
             return None
 
     def _checkpoint(self, agent_id: str) -> Any:
-        """Load an agent's persisted checkpoint, or None."""
+        """Load an agent's persisted checkpoint, or None.
+
+        This reads the **operator's** on-disk ``CheckpointStore``
+        (``dhc.agent.checkpoint``) — the operator's resumability mechanism,
+        surfaced via ``/resume``. It is deliberately separate from the
+        agent's own workspace checkpoints (``state["checkpoints"]`` in the
+        fabrication kit), which live in the agent's context. The split is
+        intended (decision 0012, H-06); the on-disk store is not in the
+        agent's context.
+        """
         store = getattr(self.runtime, "checkpoint_store", None)
         if store is None:
             return None

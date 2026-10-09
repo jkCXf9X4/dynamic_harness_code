@@ -9,6 +9,15 @@ This module is a *peripheral wrapper*: it does not import or modify the core
 callable (``driver(agent) -> str | None``) and persists state before and after
 each turn, best-effort — a store failure is logged and never breaks the driver
 loop.
+
+**Operator-only (decision 0012, H-06).** This on-disk store is the
+*operator's* resumability mechanism, surfaced via the terminal's ``/resume``.
+It is deliberately separate from the *agent's* own workspace checkpoints
+(``state["checkpoints"]`` in the fabrication kit, ``dhc.llm.fabrication``),
+which live in the agent's context as ordinary data. The split is intended:
+the agent owns its context, the operator owns the runtime's durable state.
+The store is not instantiated in production wiring (``build_runtime``), so it
+is dormant until an operator attaches it.
 """
 
 from __future__ import annotations
