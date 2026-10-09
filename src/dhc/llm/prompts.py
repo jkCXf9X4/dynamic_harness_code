@@ -1,13 +1,24 @@
-"""Single place where dhc agent prompts are shaped.
+"""Structured prompt composition for dhc agents (SUPERSEDED by G-02).
 
-Adopts the reference project's "presetup prompts" pattern: a static system
-prompt file (``agent_system_prompt.txt``) plus role/orchestrator constants and
-a steerage block, all composed ONCE at agent start into a byte-identical
-system-prompt prefix (prompt caching). Per-turn state is delivered by the
-runtime separately, never by mutating this prefix.
+Historical note: this module was authored as the "presetup prompts" pattern
+(a static system prompt file plus role/orchestrator constants and a steerage
+block, composed once at agent start). It was never wired into the driver:
+``LLMDriver`` assembled its prompt from its own template, and an earlier
+revision of this docstring falsely claimed the driver consumed
+:func:`compose_initial_prompt`.
 
-The driver consumes the composed prompt via :func:`compose_initial_prompt` at
-agent start; nothing here is a per-turn observation.
+G-02 resolved that split by making prompt assembly a workspace-swappable kit
+citizen: the default is :func:`dhc.llm.driver.default_build_prompt` (the
+byte-identical extraction of the historical ``LLMDriver._build_prompt``),
+installed in every agent workspace as ``build_prompt``. An agent that
+replaces it — the workspace name or the persistent ``state["build_prompt"]``
+slot — changes the prompt the LLM receives.
+
+This module is therefore explicitly SUPERSEDED by that citizen. It is kept
+(unwired) as a standalone composition utility for callers that want the
+structured system-prompt/steerage layout; nothing in the runtime consumes
+it. This repo has no ``deprecated/`` convention, so the supersession is
+recorded here.
 """
 
 from __future__ import annotations
@@ -142,8 +153,15 @@ def compose_initial_prompt(
     budget: Optional[str] = None,
     environment: Optional[str] = None,
 ) -> str:
-    """The full "presetup" the driver sends at agent start: system prompt +
-    steerage + user message, composed once and byte-identical for caching."""
+    """The full "presetup" composition: system prompt + steerage + user
+    message (standalone utility; SUPERSEDED as the runtime's prompt source).
+
+    Nothing in the runtime consumes this: the driver's prompt assembly is
+    the workspace citizen ``build_prompt`` (default
+    :func:`dhc.llm.driver.default_build_prompt`). Callers that want this
+    structured layout can compose it here and install it as their agent's
+    ``build_prompt`` replacement.
+    """
     system_prompt = build_system_prompt(AGENT_SYSTEM_PROMPT, role=role)
     steerage = build_steerage(
         intent=intent,
