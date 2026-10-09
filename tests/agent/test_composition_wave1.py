@@ -5,7 +5,7 @@ break (the integration contract for G-01 x G-05 and the pump gate order):
 
 * G-01 (agent budgets, min-clamped onto ceilings) x G-05 (parked-time
   credit): the wall clock trips iff
-  ``(time.time() - started_ts - parked_seconds) > effective_limit`` where
+  ``(time.monotonic() - started_ts - parked_seconds) > effective_limit`` where
   ``effective_limit = min(agent_budget, ceiling)`` — the agent budget only
   ever tightens, and parked time is credited against the EFFECTIVE limit.
 * The pump's between-step gate order (stop flag -> completions drain ->
@@ -38,7 +38,7 @@ def _pumped_runtime(tmp_path, **settings_kwargs):
 def test_composition_budget_and_parked_credit_on_wall_clock(tmp_path):
     """G-01 x G-05: the wall clock composes min-clamp and parked credit.
 
-    Trip iff ``(time.time() - started_ts - parked_seconds) >
+    Trip iff ``(time.monotonic() - started_ts - parked_seconds) >
     effective_limit`` with ``effective_limit = min(agent_budget,
     ceiling)``. Pinned directly against the runtime predicate with an
     agent budget set in the workspace (the G-01 seam) and parked seconds
@@ -68,7 +68,7 @@ def test_composition_budget_and_parked_credit_on_wall_clock(tmp_path):
         # credit (6s) keeps 10s of elapsed time under it.
         ws["context"].budgets["timeout_seconds"] = 8.0
         cap = rt._caps_watchdog(
-            handle.id, rt.repl_engine, 0, time.time() - 10.0, parked_seconds=6.0
+            handle.id, rt.repl_engine, 0, time.monotonic() - 10.0, parked_seconds=6.0
         )
         assert cap is None
 
@@ -76,7 +76,7 @@ def test_composition_budget_and_parked_credit_on_wall_clock(tmp_path):
         # 6s credit no longer saves the agent (10-6=4 > 3).
         ws["context"].budgets["timeout_seconds"] = 3.0
         hit = rt._caps_hit(
-            handle.id, rt.repl_engine, 0, time.time() - 10.0, parked_seconds=6.0
+            handle.id, rt.repl_engine, 0, time.monotonic() - 10.0, parked_seconds=6.0
         )
         assert hit == {"cap": "wall_clock", "limit": 3.0, "source": "agent_budget"}
 
@@ -84,7 +84,7 @@ def test_composition_budget_and_parked_credit_on_wall_clock(tmp_path):
         # the effective limit (10-8=2 <= 3): the credit composes with the
         # clamp, not just with the ceiling.
         hit = rt._caps_hit(
-            handle.id, rt.repl_engine, 0, time.time() - 10.0, parked_seconds=8.0
+            handle.id, rt.repl_engine, 0, time.monotonic() - 10.0, parked_seconds=8.0
         )
         assert hit is None
     finally:

@@ -253,16 +253,16 @@ def test_g05_wall_clock_credit_arithmetic(tmp_path):
         handle = rt.spawn("capcheck", driver=MockDriver.single("complete('ok')"))
         assert handle.await_().status == AgentStatus.completed
         # 10s of elapsed wall time, no credit: trips.
-        cap = rt._caps_watchdog(handle.id, rt.engine, 0, time.time() - 10.0)
+        cap = rt._caps_watchdog(handle.id, rt.engine, 0, time.monotonic() - 10.0)
         assert cap == "wall_clock"
         # 6s of that was parked: 10 - 6 = 4 < 5 -> no trip.
         cap = rt._caps_watchdog(
-            handle.id, rt.engine, 0, time.time() - 10.0, parked_seconds=6.0
+            handle.id, rt.engine, 0, time.monotonic() - 10.0, parked_seconds=6.0
         )
         assert cap is None
         # Only 4s credited: 10 - 4 = 6 > 5 -> still trips (no over-credit).
         cap = rt._caps_watchdog(
-            handle.id, rt.engine, 0, time.time() - 10.0, parked_seconds=4.0
+            handle.id, rt.engine, 0, time.monotonic() - 10.0, parked_seconds=4.0
         )
         assert cap == "wall_clock"
     finally:

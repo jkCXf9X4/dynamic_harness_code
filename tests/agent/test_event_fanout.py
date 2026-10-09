@@ -161,27 +161,27 @@ def test_watchdog_counts_per_step_delta_without_consuming(tmp_path):
         # agent's own history (turn_started / child_settled / ...) and must
         # not trip a cap of 3 on a settled single-turn agent... it may exceed
         # 3 if the history is longer, so only assert it does not consume.
-        rt._caps_watchdog(agent_id, rt.engine, 1, time.time())
+        rt._caps_watchdog(agent_id, rt.engine, 1, time.monotonic())
         before = len(rt.event_bus.peek(topic))
         assert before > 0  # the history is intact after the watchdog ran
 
         # Step 2: exactly 3 fresh events -> delta 3, cap 3 -> not exceeded.
         for i in range(3):
             rt.event_bus.publish(topic, _marker(agent_id, i))
-        cap = rt._caps_watchdog(agent_id, rt.engine, 2, time.time())
+        cap = rt._caps_watchdog(agent_id, rt.engine, 2, time.monotonic())
         assert cap is None
         assert len(rt.event_bus.peek(topic)) == before + 3  # still intact
 
         # Step 3: one more event (4 markers total). A cumulative count would
         # be 4 > 3 and trip; the per-step delta is 1 -> not exceeded.
         rt.event_bus.publish(topic, _marker(agent_id, 3))
-        cap = rt._caps_watchdog(agent_id, rt.engine, 3, time.time())
+        cap = rt._caps_watchdog(agent_id, rt.engine, 3, time.monotonic())
         assert cap is None
 
         # The cap still fires on a genuinely oversized step (gate (f)).
         for i in range(4, 8):
             rt.event_bus.publish(topic, _marker(agent_id, i))
-        cap = rt._caps_watchdog(agent_id, rt.engine, 4, time.time())
+        cap = rt._caps_watchdog(agent_id, rt.engine, 4, time.monotonic())
         assert cap == "messages_per_step"
     finally:
         rt.stop()
@@ -206,7 +206,7 @@ def test_events_and_recent_context_receive_every_event(tmp_path):
 
         # The watchdog ran first (consumer 1) — historically its drain stole
         # the topic, so this would have returned [].
-        rt._caps_watchdog(agent_id, rt.engine, 1, time.time())
+        rt._caps_watchdog(agent_id, rt.engine, 1, time.monotonic())
         events = rt.events(agent_id)
         kinds = [e.kind for e in events]
         assert EventKind.turn_started in kinds
@@ -318,7 +318,7 @@ def test_concurrent_consumers_lose_no_events(tmp_path):
             step = 0
             while not done.is_set():
                 step += 1
-                rt._caps_watchdog(agent_id, rt.engine, step, time.time())
+                rt._caps_watchdog(agent_id, rt.engine, step, time.monotonic())
                 time.sleep(0.001)
 
         threads = [
