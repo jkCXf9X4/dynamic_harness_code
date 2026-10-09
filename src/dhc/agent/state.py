@@ -27,10 +27,36 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from ..data.models import AgentStatus, Result
+from ..data.models import AgentStatus, EventKind, Result
 
 ID_CHARS = 8
 TREE_DESC_CHARS = 40
+
+#: Event kinds the snapshot records as *terminal* (force snapshot + a
+#: dedicated record), keyed by the :class:`EventKind` member — not by its
+#: string value — so a renamed member name is an import-time ``AttributeError``
+#: rather than a silent drop (decision 0009, IMP-002). The value is the
+#: ``event`` field written to ``events.jsonl``.
+TERMINAL_EVENT_KINDS: dict[EventKind, str] = {
+    EventKind.escalation: "escalation",
+}
+
+
+def _terminal_record(kind: EventKind, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Build the ``events.jsonl`` record for a terminal *kind* (decision 0009).
+
+    Enum-keyed: the record shape follows the :class:`EventKind` member, so the
+    mapping is the single source of truth for terminal event records.
+    """
+    if kind is EventKind.escalation:
+        return {
+            "event": "escalation",
+            "agent_id": agent_id,
+            "issue": payload.get("issue", ""),
+        }
+    # Unreachable for a kind in TERMINAL_EVENT_KINDS today; a new terminal
+    # kind must add its record shape here (a visible, reviewable change).
+    raise ValueError(f"no terminal record shape for {kind!r}")
 
 
 def _clip(text: str, n: int) -> str:
@@ -348,9 +374,9 @@ class StateWriter:
     def attach(self, runtime: Any = None) -> None:
         """Subscribe to the runtime's event bus (if it has one).
 
-        Terminal events (report / failure / escalation) trigger force
-        snapshots + events.jsonl appends; activity events trigger throttled
-        snapshots. Also writes one snapshot at attach.
+        Terminal events (the kinds in :data:`TERMINAL_EVENT_KINDS`) trigger
+        force snapshots + events.jsonl appends; activity events trigger
+        throttled snapshots. Also writes one snapshot at attach.
         """
         runtime = runtime if runtime is not None else self.runtime
         bus = getattr(runtime, "event_bus", None)
@@ -362,37 +388,24 @@ class StateWriter:
 
         def on_event(event: Any) -> None:
             kind = getattr(event, "kind", None)
-            kind_value = kind.value if hasattr(kind, "value") else str(kind)
             agent_id = getattr(event, "agent_id", "")
             payload = getattr(event, "payload", None) or {}
             ts = getattr(event, "ts", None)
-            if kind_value == "report":
-                self.append_event({
-                    "event": "report",
-                    "agent_id": agent_id,
-                    "summary": payload.get("summary", ""),
-                    "confidence": payload.get("confidence"),
-                    "artifact_ids": payload.get("artifact_ids", []),
-                    "files_written": payload.get("files_written", []),
-                }, ts=ts)
-                self.snapshot(force=True)
-            elif kind_value == "failure":
-                self.append_event({
-                    "event": "failure",
-                    "agent_id": agent_id,
-                    "error": payload.get("error", ""),
-                }, ts=ts)
-                self.snapshot(force=True)
-            elif kind_value == "escalation":
-                self.append_event({
-                    "event": "escalation",
-                    "agent_id": agent_id,
-                    "issue": payload.get("issue", ""),
-                }, ts=ts)
+            if isinstance(kind, EventKind) and kind in TERMINAL_EVENT_KINDS:
+                # Terminal: a dedicated record + a forced snapshot so the
+                # tree reflects the final state immediately. The branch is
+                # keyed by the EventKind member (TERMINAL_EVENT_KINDS), not
+                # by a string literal (decision 0009).
+                self.append_event(
+                    _terminal_record(kind, agent_id, payload), ts=ts
+                )
                 self.snapshot(force=True)
             else:
-                # Activity: keep the tree fresh while work progresses
-                # (throttled), not only on terminal events.
+                # Activity: any other EventKind, or a non-enum kind. Keep the
+                # tree fresh while work progresses (throttled), not only on
+                # terminal events. The fallback never drops an event — an
+                # unrecognized kind is recorded verbatim (decision 0009).
+                kind_value = kind.value if hasattr(kind, "value") else str(kind)
                 self.append_event({
                     "event": "activity",
                     "agent_id": agent_id,

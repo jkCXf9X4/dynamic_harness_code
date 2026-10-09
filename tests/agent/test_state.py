@@ -17,6 +17,7 @@ from dhc.agent.agent import Agent
 from dhc.data.models import AgentStatus, Event, EventKind, Result
 from dhc.agent.runtime import Runtime
 from dhc.agent.state import (
+    TERMINAL_EVENT_KINDS,
     AgentNode,
     StateWriter,
     build_agent_tree,
@@ -363,3 +364,149 @@ def test_render_text_tree_box_drawing_and_statuses():
 
 def test_render_text_tree_empty():
     assert render_text_tree([]) == "(no agents)\n"
+
+
+# --------------------------------------------------------------------------- #
+# Event-kind mapping (decision 0009, IMP-002)
+#
+# The snapshot must route every EventKind through the enum-keyed mapping in
+# TERMINAL_EVENT_KINDS — a renamed or new kind must never be silently dropped.
+# These tests drive the mapping through a synchronous fake bus so the routing
+# is deterministic (no polling thread, no wait_for).
+# --------------------------------------------------------------------------- #
+
+
+class _FakeBus:
+    """Synchronous in-memory bus: ``publish`` calls global subscribers inline."""
+
+    def __init__(self) -> None:
+        self._subs: list = []
+
+    def subscribe_global(self, cb) -> None:
+        self._subs.append(cb)
+
+    def publish(self, event) -> None:
+        for cb in self._subs:
+            cb(event)
+
+
+class _FakeRuntime:
+    """Minimal runtime: a global bus and an empty agent registry."""
+
+    def __init__(self) -> None:
+        self.event_bus = _FakeBus()
+        self._agents = {}
+
+
+def _attach_fake_writer(tmp_path) -> tuple[StateWriter, _FakeBus, list]:
+    """Attach a writer to a synchronous fake bus and return a *spy* that
+    records every ``snapshot(force=...)`` call (instance attribute shadows the
+    bound method, so ``self.snapshot(...)`` inside ``on_event`` hits the spy).
+    """
+    rt = _FakeRuntime()
+    writer = StateWriter(rt, root=tmp_path, snapshot_interval=60.0)
+    calls: list[bool] = []
+    orig = writer.snapshot
+
+    def spy(force: bool = False) -> None:
+        calls.append(force)
+        orig(force)
+
+    writer.snapshot = spy  # type: ignore[method-assign]
+    writer.attach()
+    return writer, rt.event_bus, calls
+
+
+def _read_events(tmp_path) -> list[dict]:
+    path = tmp_path / "events.jsonl"
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
+
+
+def test_every_event_kind_is_recorded_not_dropped(tmp_path):
+    """Publishing every EventKind member yields a record for each — no silent
+    drop. Iterating the enum means a *new* member is covered automatically."""
+    writer, bus, calls = _attach_fake_writer(tmp_path)
+    for kind in EventKind:
+        bus.publish(Event(kind=kind, agent_id="a1", payload={}))
+
+    recorded = _read_events(tmp_path)
+    # Exactly one record per kind (the fake bus is synchronous, no other
+    # events are in flight).
+    assert len(recorded) == len(EventKind)
+    recorded_kinds = {rec.get("event_type") or rec.get("event") for rec in recorded}
+    for kind in EventKind:
+        assert kind.value in recorded_kinds, f"{kind!r} was silently dropped"
+
+
+def test_terminal_kind_escalation_forces_snapshot_and_records_issue(tmp_path):
+    """Per-kind terminal test: EventKind.escalation records a dedicated
+    ``escalation`` record and forces a snapshot (rewrites the tree even within
+    the throttle window)."""
+    writer, bus, calls = _attach_fake_writer(tmp_path)
+    assert calls == [True]  # attach's initial forced snapshot
+
+    bus.publish(Event(kind=EventKind.escalation, agent_id="a1", payload={"issue": "help"}))
+
+    rec = _read_events(tmp_path)[-1]
+    assert rec["event"] == "escalation"
+    assert rec["agent_id"] == "a1"
+    assert rec["issue"] == "help"
+    # Terminal forces a snapshot: a new force=True call despite the 60s window.
+    assert calls == [True, True]
+
+
+def test_activity_kind_records_event_type_and_throttles(tmp_path):
+    """Per-kind activity test: a non-terminal kind records an ``activity``
+    record carrying its ``event_type`` and does NOT force a snapshot (throttled
+    within the window)."""
+    writer, bus, calls = _attach_fake_writer(tmp_path)
+    assert calls == [True]  # attach's initial forced snapshot
+
+    bus.publish(Event(kind=EventKind.turn_started, agent_id="a1", payload={}))
+
+    rec = _read_events(tmp_path)[-1]
+    assert rec["event"] == "activity"
+    assert rec["event_type"] == "turn_started"
+    assert rec["agent_id"] == "a1"
+    # Activity is throttled: the snapshot call is made with force=False and,
+    # within the 60s window, the real snapshot is a no-op (no rewrite).
+    assert calls == [True, False]
+
+
+def test_terminal_table_keys_are_real_event_kinds():
+    """Every key in TERMINAL_EVENT_KINDS is a real EventKind member. A stale or
+    renamed member name in the table is caught here (the import-time
+    AttributeError is the loud path)."""
+    assert set(TERMINAL_EVENT_KINDS) <= set(EventKind)
+
+
+def test_terminal_set_is_explicit():
+    """Pin the terminal set so promoting a new kind to terminal is a visible,
+    reviewable test change — not an accident."""
+    assert set(TERMINAL_EVENT_KINDS) == {EventKind.escalation}
+
+
+def test_renamed_terminal_member_fails_loudly_not_silently():
+    """IMP-002's core hazard: a *renamed* kind must surface, not silently drop.
+
+    The terminal table is keyed by ``EventKind`` *members* (not string values),
+    so it is built by *referencing* each member. Renaming a member (e.g.
+    ``escalation`` -> ``escalated``) without updating the table makes that
+    reference an import-time ``AttributeError`` — loud, not a silent drop.
+    Prove the mechanism on the real table:
+    """
+    # The table is member-keyed: every key is a live EventKind member. This is
+    # the property that makes a rename loud (a string-keyed table would not).
+    assert all(isinstance(k, EventKind) for k in TERMINAL_EVENT_KINDS)
+    # The table is built by referencing members. A renamed-away name is a hard
+    # AttributeError at construction time — the import-time loud path. This
+    # mirrors what happens to TERMINAL_EVENT_KINDS if `escalation` were
+    # renamed to `escalated` and the table not updated.
+    with pytest.raises(AttributeError):
+        {EventKind.escalated: "escalated"}  # noqa: B018 - deliberate bad ref
