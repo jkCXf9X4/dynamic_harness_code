@@ -2,7 +2,7 @@
 id: INFO-053
 type: info
 title: The control split — agent vs runtime
-summary: The product-level control boundary: everything reachable in an agent's workspace is the agent's to inspect and change; every mesh-survival guarantee is runtime behavior no agent code can edit or skip
+summary: The product-level control boundary: everything reachable in an agent's workspace is the agent's to inspect and change; every mesh-survival guarantee is runtime behavior no agent code can edit or skip — and the orthogonal boundary of what the framework core knows (0014)
 date: 2026-10-08
 status: current
 ---
@@ -60,6 +60,25 @@ the agent too. It is about who enforces.
   runtime's dispatcher (`INFO-047`), never by child-side code.
 - **Fabrication integrity.** A broken or deleted default (loop, decision
   policy, context) is re-seeded by the runtime.
+
+## A second boundary — what the core knows
+
+This split answers **who enforces** (agent vs runtime). It is orthogonal to a
+second boundary fixed by `0014`: **what the framework core carries**. The core
+owns only what the control loop needs to be correct — the guarantees listed
+under runtime control above. Everything that persists, observes, or renders
+state (the artifact store, the boundary log, operator viewers) is operator
+tooling: composed at the composition root, one-way dependent on the core, and
+known to the core only as opaque ids and event kinds. Removability is the
+entry condition for composition, not the verdict — the engine and the
+channels are removable and framework-side. The classifier is what the core
+does with the concern: data it only carries opaquely, so someone can persist,
+observe, or render it, is tooling; semantics it interprets, or communication
+the runtime itself relays (channels, escalation), is framework-side. The
+artifact contract is the worked example: its *vocabulary* — the
+content-addressed `Artifact` model, the disclosure tiers, the
+`artifact_published` event — is framework; its *medium*, the store holding
+the bodies, is tooling.
 
 ## Owns
 - The product-level control split: the agent-controlled surface, the

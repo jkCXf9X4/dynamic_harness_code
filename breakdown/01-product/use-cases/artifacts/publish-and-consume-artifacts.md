@@ -15,7 +15,11 @@ status: current
 
 ## Motivation
 
-Part of the public code interface
+Agents must share findings without polluting each other's context (`INFO-001`,
+`INFO-012`), and whatever crosses the mesh must be immutable and verifiable
+(`INFO-001`). The artifact protocol is how the architecture delivers both
+promises — content address, disclosure tiers, one publish event — with the
+vocabulary framework-owned and the medium in operator tooling (`0014`).
 
 ## Owns
 - The artifact-driven communication and progressive-disclosure contract.

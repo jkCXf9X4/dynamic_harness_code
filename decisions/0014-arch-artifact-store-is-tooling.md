@@ -103,6 +103,27 @@ constructors must not expose a store parameter.
   config consumed by tooling, and `state._default_root` derives the run root
   from its *parent* path. Both remain path-level only; no store object
   crosses the line.
+- **Where the refined line falls:** the channel tools (`room`, `messenger`,
+  `escalate`, `ask_operator`, `post`, `channel_read`) remain in
+  `dhc.agent.tools` deliberately — they relay communication on the runtime's
+  own event bus and persist nothing, so they are framework-side composition
+  even though the core runs without them. Removability is not the classifier
+  (the core also runs without a real engine); what classifies a concern is
+  whether the core carries its data opaquely to operator-side persistence
+  (tooling) or the concern relays communication and execution semantics the
+  runtime owns (framework-side).
+- **Adjacent placement debt, named not moved:** two more operator-side
+  persistence modules still live inside the framework package —
+  `dhc.agent.state` (writes `agent_tree.json` / `stats.json` / `events.jsonl`
+  for manual operator review) and `dhc.agent.checkpoint` (the operator's
+  resumability mechanism, dormant in production per 0012). Both are
+  self-contained leaves — nothing in the core imports them, and their
+  dependencies are one-way framework-ward — so they violate no enforced
+  boundary, but by the classifier above they are tooling-class concerns and
+  candidates for the same move as a follow-up. The operator side also spans
+  two packages: `ui/` (the interaction surface, including state *renderers*
+  such as the `/artifacts` viewer) and `tooling/` (state *infrastructure*);
+  the classifier classifies concerns, the guard test enforces the core seam.
 
 ## Rejected alternatives
 

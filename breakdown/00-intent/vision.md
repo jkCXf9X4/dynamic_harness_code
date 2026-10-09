@@ -2,7 +2,7 @@
 id: INFO-001
 type: info
 title: VISION
-summary: Mission, principles, action loop, and boundaries for code-as-action-space
+summary: Mission, principles, action loop, and boundaries — code-as-action-space, and framework core vs operator tooling
 date: 2026-10-05
 status: current
 pb_exempt: true
@@ -44,14 +44,26 @@ keeps agent turns few.
 4. **Agent-developed tools.** Capabilities are extensible by agents themselves, outside
    the harness release cycle — the harness is a substrate, not a tool set.
 5. **Recursive task decomposition.** Parents decompose by writing delegation code. 
-6. **Context encapsulation.** 
-7. **Artifact-driven communication.** Findings, results, and every action's code persist
-   as immutable, content-addressed artifacts; parents receive summaries plus artifact IDs.
+6. **Context encapsulation.** An agent's context is its scarcest resource, so work
+   crosses agents as content-addressed ids and summaries — never as full bodies. A
+   mesh shares findings without polluting each other's context; detail is pulled,
+   tier by tier, only when a consumer actually needs it (`INFO-006`, `INFO-012`).
+7. **Immutable, verifiable artifacts.** Whatever crosses the mesh — findings,
+   results, and the code of every action — is an immutable, content-addressed
+   artifact: a handed-off claim cannot silently change, and its id proves what
+   it contains. How that is delivered — the protocol, the tiers, the storage —
+   is architecture, not vision (`INFO-006`, `0014`).
 8. **Progressive disclosure.** Artifacts expose headline → summary → report tiers; consumers
    pull detail on demand.
 9. **Per-agent persistent REPL.** Every agent works in a persistent computational workspace of its
    own — REPL state persists across actions, agent-developed tools live in it, and artifacts remain
    the durable medium for findings that cross agents or must outlive the agent.
+10. **The core owns the contract; the operator owns the medium.** The framework
+    core is a small, stable set of guarantees — lifecycle, settlement,
+    containment, caps, event discipline. Whatever an operator needs —
+    persisting, observing, or rendering state — is tooling composed around
+    that core, one-way dependent on it, never inside it. Where the line falls
+    for a new concern is decided in the architecture (`INFO-053`, `0014`).
 
 ## Inspirations
 
