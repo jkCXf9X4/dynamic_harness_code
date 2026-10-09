@@ -140,6 +140,14 @@ class Agent:
         # Runtime-owned collaborators (injected; duck-typed).
         self._runtime = runtime
         self._artifact_store = artifact_store
+        # Token/cost accumulators (IMP-004). Written only by
+        # ``record_usage`` — the single accumulation point, called from the
+        # driver seam; read by the state view-model (``build_agent_tree``).
+        # The mock path never calls ``record_usage``, so these stay zero.
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
+        self._cached_tokens = 0
+        self._cost_usd = 0.0
 
     # -- identity / lifecycle ------------------------------------------------
 
@@ -150,6 +158,49 @@ class Agent:
     def done(self) -> bool:
         """True once the agent has settled (reached a terminal state)."""
         return self._result is not None and is_terminal(self._status)
+
+    # -- token/cost accounting (IMP-004) ------------------------------------
+
+    def record_usage(self, usage: Optional[dict], cost_usd: Optional[float]) -> None:
+        """Accumulate one provider response's usage onto this agent.
+
+        The ONE accumulation point: called only from the driver seam
+        (``LLMDriver.__call__``) with the client's last response usage.
+        None-safe — a ``None`` usage or missing keys contribute nothing, so
+        a usage-less provider call (or the mock path) leaves the counters
+        unchanged rather than crashing or fabricating a number.
+        """
+        if usage:
+            self._prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+            self._completion_tokens += int(usage.get("completion_tokens", 0) or 0)
+            self._cached_tokens += int(usage.get("cached_tokens", 0) or 0)
+        if cost_usd is not None:
+            self._cost_usd += float(cost_usd)
+
+    @property
+    def prompt_tokens(self) -> int:
+        """Total prompt tokens across this agent's provider calls."""
+        return self._prompt_tokens
+
+    @property
+    def completion_tokens(self) -> int:
+        """Total completion tokens across this agent's provider calls."""
+        return self._completion_tokens
+
+    @property
+    def cached_tokens(self) -> int:
+        """Total prompt-cache tokens across this agent's provider calls."""
+        return self._cached_tokens
+
+    @property
+    def tokens(self) -> int:
+        """Total tokens (prompt + completion) across this agent's calls."""
+        return self._prompt_tokens + self._completion_tokens
+
+    @property
+    def cost_usd(self) -> float:
+        """Running USD estimate across this agent's provider calls."""
+        return self._cost_usd
 
     # -- delegation ----------------------------------------------------------
 

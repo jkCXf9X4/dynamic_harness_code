@@ -186,8 +186,9 @@ def build_agent_tree(runtime: Any) -> list[AgentNode]:
     registered). Children are resolved via ``runtime.children_of``; the
     registry is read through ``runtime._agents`` (the runtime's public
     ``get``/``children_of``/``status``/``result``/``is_settled`` API plus the
-    documented ``_agents`` registry). Token/cost fields default to 0/None
-    because dhc does not track per-agent usage today.
+    documented ``_agents`` registry). Token/cost fields are copied from the
+    agent's accumulators (the driver seam's ``record_usage``, IMP-004);
+    agents without usage (mock path) keep the zero defaults.
     """
     agents = getattr(runtime, "_agents", None)
     if agents is None:
@@ -202,10 +203,24 @@ def build_agent_tree(runtime: Any) -> list[AgentNode]:
             for cid in runtime.children_of(aid)
             if cid in agents
         ]
+        # The ONE read seam (IMP-004): copy the agent's accumulated usage
+        # (written only by the driver seam via ``record_usage``) into the
+        # view-model. Agents without accumulators (mock path, foreign
+        # objects) keep the zero defaults.
+        prompt_tokens = int(getattr(agent, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(agent, "completion_tokens", 0) or 0)
+        cached_tokens = int(getattr(agent, "cached_tokens", 0) or 0)
+        cost_usd = float(getattr(agent, "cost_usd", 0.0) or 0.0)
         return AgentNode(
             agent_id=aid,
             description=description,
             status=_agent_status(runtime, aid),
+            tokens=prompt_tokens + completion_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+            cost_usd=cost_usd,
+            cum_cost_usd=cost_usd,
             artifact_ids=_agent_result_artifacts(runtime, aid),
             children=children,
         )
@@ -220,13 +235,33 @@ def build_agent_tree(runtime: Any) -> list[AgentNode]:
 
 
 def build_stats(runtime: Any) -> Stats:
-    """Aggregate counters over the whole agent tree."""
+    """Aggregate counters over the whole agent tree.
+
+    Token/cost counters sum the node values (which the driver seam's
+    ``record_usage`` populates, IMP-004); the cache hit rate is the
+    aggregate ``cached / prompt`` over the whole tree.
+    """
     nodes = build_agent_tree(runtime)
 
     def walk(nodes: list[AgentNode]) -> int:
         return sum(1 + walk(node.children) for node in nodes)
 
-    return Stats(agents=walk(nodes))
+    def sum_field(nodes: list[AgentNode], field: str) -> float:
+        return sum(
+            getattr(node, field) + sum_field(node.children, field)
+            for node in nodes
+        )
+
+    prompt_tokens = int(sum_field(nodes, "prompt_tokens"))
+    cached_tokens = int(sum_field(nodes, "cached_tokens"))
+    return Stats(
+        agents=walk(nodes),
+        tokens=int(sum_field(nodes, "tokens")),
+        prompt_tokens=prompt_tokens,
+        cached_tokens=cached_tokens,
+        cache_hit_rate=cache_hit_rate(prompt_tokens, cached_tokens),
+        cost_usd=float(sum_field(nodes, "cost_usd")),
+    )
 
 
 def render_text_tree(nodes: list[AgentNode]) -> str:

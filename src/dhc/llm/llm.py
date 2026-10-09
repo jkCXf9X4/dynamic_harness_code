@@ -489,6 +489,11 @@ class LLMClient:
             price_input_per_mtok=provider_cfg.price_input_per_mtok,
             price_output_per_mtok=provider_cfg.price_output_per_mtok,
         )
+        # The most recent response's usage/cost (IMP-004). The driver reads
+        # these off the client after each generate_code_block and writes them
+        # onto the agent — the client only records, it never touches the agent.
+        self._last_usage: Optional[dict] = None
+        self._last_cost: Optional[float] = None
 
     @property
     def _client(self) -> object:
@@ -515,6 +520,10 @@ class LLMClient:
             prompt if context is None else f"{prompt}\n\nContext:\n{context}"
         )
         response = self._provider.generate(_SYSTEM_PROMPT, user_content)
+        # Record the response's usage/cost for the driver seam (IMP-004):
+        # the driver reads them after the call and writes them onto the agent.
+        self._last_usage = response.usage
+        self._last_cost = response.cost_usd
         return _strip_markdown_fences(response.text)
 
     def close(self) -> None:
@@ -544,6 +553,10 @@ class MockLLM:
         self._mapping = dict(mapping or {})
         self._default = default
         self._fn = fn
+        # Interface parity with LLMClient (IMP-004): the mock never fabricates
+        # usage, so these stay None and the driver seam writes nothing.
+        self._last_usage: Optional[dict] = None
+        self._last_cost: Optional[float] = None
 
     def available(self) -> bool:
         return True

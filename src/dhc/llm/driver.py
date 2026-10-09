@@ -175,7 +175,21 @@ class LLMDriver:
             logger.warning("LLMDriver client failure for agent %s: %s", agent.id, reason)
             return f"fail({json.dumps(reason)})"
         if not code or not code.strip():
+            # Settle: no block was produced, so no usage is attributed.
+            # (Recording here would re-count the client's stale _last_usage
+            # from the previous call — usage is attributed to the block that
+            # was actually produced, not to the settle probe.)
             return None
+        # The ONE write seam (IMP-004): provider usage flows into agent
+        # state here — the only place that holds both the agent and the
+        # client that just produced the block. The client records the
+        # response's usage/cost on itself; a client without those
+        # attributes (or a usage-less response) writes nothing.
+        usage = getattr(self._client, "_last_usage", None)
+        if usage is not None:
+            record = getattr(agent, "record_usage", None)
+            if record is not None:
+                record(usage, getattr(self._client, "_last_cost", None))
         if self._rot_detector is not None:
             report = self._rot_detector.observe(code)
             # G-06: stash the latest report on the agent — a
