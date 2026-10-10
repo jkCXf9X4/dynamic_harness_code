@@ -12,7 +12,7 @@ status: current
 The runtime commits to one fixed control boundary.
 Everything reachable inside an agent's workspace is the agent's to inspect and change.
 Every guarantee the mesh depends on is runtime behavior, evaluated outside agent code.
-It is not data the agent holds, so there is nothing to edit and nothing to defeat.
+It is not data the agent holds, so there is nothing to edit and nothing to defeat (`INFO-052`).
 The split is not about visibility: caps and tripwires are visible to the agent too.
 It is about who enforces.
 
@@ -21,7 +21,7 @@ It is about who enforces.
 - **The main loop.**
   - How the agent works, including orchestration cadence, is workspace code.
   - Agent views, edits, replaces it.
-  - The default loop ships as a fabrication the agent starts from.
+  - The default loop ships as a fabrication the agent starts from (`INFO-050`).
 - **The decision policy.** How the next action is chosen, including prompt assembly, is a workspace function the agent may swap.
 - **Context and history.**
   - Agent reads and manages its full accumulated state as ordinary data.
@@ -37,11 +37,13 @@ It is about who enforces.
   - How the agent waits: await, poll, sleep.
   - Waiting on others consumes no agent budget.
   - Parked time (await on a child, sleep) is credited against the wall-clock ceiling.
-  - The pump accumulates the seconds each agent spends parked.
-  - It passes the cumulative credit to the caps watchdog.
+  - How the credit is measured: `INFO-060`.
 - **Tools.** Agent-developed tools are workspace variables (`INFO-007`).
 
 ## Under runtime control
+
+The first four items are the hard gates, the mesh-survival core (`INFO-037`).
+The rest are runtime-owned correctness beyond survival.
 
 - **Settlement.**
   - A result settles at most once (`INFO-046`).
@@ -53,19 +55,20 @@ It is about who enforces.
 - **Ceiling caps.**
   - Wall-clock, step count, workspace size, child count, message rate bind regardless of any budget edit the agent makes.
   - The wall-clock ceiling binds all non-parked wall time.
-  - The credit is runtime-owned: measured by the pump around suspend/resume.
-  - The pump clamps at zero, never exceeding elapsed time.
+  - The credit is runtime-owned and never exceeds elapsed time.
   - A parked-forever agent is contained by cancellation, not the wall clock.
+  - Clock base and measurement: `INFO-060`.
 - **Cancellation.** A cancelled agent gets a grace window, then is stopped and settled (`INFO-040`).
 - **Event discipline.**
-  - FIFO, at-most-once delivery, persist-before-execute (`INFO-049`).
+  - FIFO, at-most-once delivery, persist-before-execute (`INFO-048`).
   - Consumption is the agent's.
   - The guarantees are the runtime's (`INFO-051`).
 - **Enforcement timing.**
   - Tripwires and caps are evaluated between agent actions by the runtime.
   - A degrading agent cannot skip its own leash.
 - **Completion dispatch.** Child completions reach the parent through the runtime's dispatcher (`INFO-047`), never by child-side code.
-- **Fabrication integrity.** A broken or deleted default (loop, decision policy, context) is re-seeded by the runtime.
+- **Fabrication integrity.** A broken or deleted default (loop, decision policy, context) is re-seeded by the runtime (`AD-011`).
+- **Directed-message delivery.** Routing, rate cap, and persistence of a directed message are runtime behavior; the message reaches the recipient's awareness (`INFO-054`).
 
 ## Owns
 

@@ -3,7 +3,7 @@ id: INFO-001
 type: info
 title: VISION
 summary: Mission, principles, action loop, boundaries. Code as action space. Framework core vs operator tooling.
-date: 2026-10-05
+date: 2026-10-10
 status: current
 pb_exempt: true
 ---
@@ -17,10 +17,15 @@ pb_exempt: true
 - **Fresh-context economics.** Decomposed 3-turn workers beat a 20-turn monolith on cost and quality (~3K delegation overhead vs >15K context rot).
 - **Mechanism.** The code block keeps agent turns few.
 
+Direction riding this substrate: agent owns its execution; platform is a minimal guardian (`INFO-052`).
+
 ## The action loop
 
 - **Emit.** Agent emits Python for its turn.
-- **Persist, execute.** Runtime persists code as immutable artifact, then executes it against agent's persistent REPL in its own subprocess.
+- **Persist.** Runtime persists code as immutable artifact.
+- **Agent-owned loop.**
+  - Loop itself is agent-authored workspace code, living in the agent's REPL (`INFO-050`, `INFO-037`).
+  - Runtime pumps it one step at a time.
 - **V-model per turn.** Code analyzes its allocated requirement, implements, verifies against parent's acceptance criteria, reports. Small V per turn.
 
 ## Principles
@@ -28,14 +33,16 @@ pb_exempt: true
 - **Container-hosted.** Full dhc runtime runs inside Docker/Podman, the outer security and deployment boundary.
 - **Agent = unit of execution.**
   - Every agent wraps in its own thread/process.
-  - Crashed child stays contained in its thread.
-  - It surfaces as failed result.
-- **Clean Python, injected traceability.**
-  - Agent code is Python. All harness plumbing is runtime-owned and invisible.
-  - Detection heuristics are runtime-owned instrumentation. Agent never authors them.
-  - Agent's rot policy `context.rot_policy` (threshold and reaction) is ordinary workspace data it may author and edit.
+  - Failed child is contained, rolled back, settles failed (`INFO-005`).
+  - Workspace is the blast radius.
+- **Clean Python, runtime-owned plumbing.**
+  - Agent code is Python. Harness plumbing is runtime-owned.
+  - Control split is who enforces, not visibility: plumbing is visible to the agent (`INFO-053`).
+  - Agent reads and manages its full state as ordinary data. No pre-filtered view of itself. No hidden state.
+  - Rot detection is runtime-owned instrumentation: invisible by default, authorable by explicit opt-in (`INFO-021`).
+  - Rot policy `context.rot_policy` (threshold and reaction) is ordinary workspace data the agent may author and edit.
   - Rot policy is observe-only by default.
-  - Agent can only tighten the default. Never loosen it or disable detection (`INFO-021`).
+  - Agent may loosen or tighten it, within the ceiling caps (`INFO-053`).
 - **Agent-developed tools.**
   - Capabilities are extensible by agents themselves, outside harness release cycle.
   - Harness is substrate, not tool set.
@@ -57,7 +64,8 @@ pb_exempt: true
   - REPL state persists across actions. Agent-developed tools live in it.
   - Artifacts remain the durable medium for findings crossing agents or outliving the agent.
 - **Core owns the contract.**
-  - Framework core is a small, stable set of guarantees: lifecycle, settlement, containment, caps, event discipline, one communication primitive.
+  - Framework core is a small, stable set of guarantees.
+  - Guarantee set is the runtime-control list plus the directed-message primitive (`INFO-053`, `INFO-054`).
   - Any agent can `send` to any other by identity.
   - Message is guaranteed to reach the recipient's awareness (`AD-009`).
 - **Operator owns the medium.**

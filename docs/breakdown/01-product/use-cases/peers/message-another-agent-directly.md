@@ -22,11 +22,9 @@ status: current
 - **Delegation-tree instance**
   - In delegation tree appears as sibling handoff (`INFO-012`).
   - Delegation-pattern instance of same channel.
-- **Boundary (decision `AD-009`)**
-  - *Primitive* is framework: `send(recipient_id, body)` core namespace action.
-  - Emits receiver-addressed `message_sent` event on recipient's own stream.
-  - Direct message reaches recipient's awareness (digest, recent context, `events` tool).
-  - No channel installed.
+- **Boundary (`INFO-054`)**
+  - Primitive spec and framework/tooling classification: `INFO-054` (decision `AD-009`).
+  - Direct message reaches recipient's awareness: digest, recent context, `events` tool.
   - Inbox read-state view (unread counts, read marking): tooling composed on top.
   - Agent chooses whether to use it.
 
@@ -37,3 +35,4 @@ status: current
 - Delegation-pipeline instance, sibling artifact handoff — `INFO-012`.
 - Parent-mediated reporting, default route — `INFO-006`.
 - Shared-room channel, many-to-many — `INFO-016`.
+- Primitive spec and framework/tooling classification — `INFO-054`.

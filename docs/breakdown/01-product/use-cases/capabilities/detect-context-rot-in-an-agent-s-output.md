@@ -3,7 +3,7 @@ id: INFO-021
 type: info
 title: Detect context rot in an agent's output
 summary: The runtime detects degradation signatures in an agent's output; the agent's rot policy (observe-only default, or escalate) decides whether a trip settles the agent and surfaces to the parent
-date: 2026-10-05
+date: 2026-10-10
 status: current
 ---
 
@@ -13,11 +13,13 @@ status: current
   - Runtime monitors each agent's output stream for degradation signatures.
   - Signatures: repeating loops of near-identical actions, gibberish, degenerate repetition.
 - **Runtime-owned detection**
-  - Detection is runtime-owned instrumentation: heuristics invisible to and never authored by agent (`INFO-001`).
+  - Detection is runtime-owned instrumentation.
+  - Heuristics invisible by default, authorable by explicit opt-in (`IMP-001`).
 - **Authorable policy half**
   - Rot *policy* is authorable half: `context.rot_policy`, ordinary workspace data agent may set and edit.
-  - Threshold min-clamped to detector default, so can only tighten.
+  - Threshold and reaction editable within the ceiling caps (`INFO-053`).
   - Reaction: `observe` by default, or `escalate`.
+  - Response policy rides the guardrail/reaction surface, not only logging (`IMP-001`, `INFO-061`).
 - **Check placement**
   - Check runs in pump between agent actions, so degrading agent cannot skip own leash.
 - **Observe-only default**
