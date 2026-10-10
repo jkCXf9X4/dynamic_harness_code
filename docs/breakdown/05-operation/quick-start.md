@@ -10,8 +10,9 @@ status: current
 # Quick start
 
 - Install: `pip install -e .`.
-- Mock path, no API key: `dhc --mock` — minimal chat TUI, deterministic mock driver.
-- Real LLM path: `export OPENAI_API_KEY=sk-...` then `dhc` — real LLM driver (gpt-4o by default).
+- Mock path, no API key: `dhc --mock` — minimal chat TUI, deterministic default driver.
+- The chat command never calls an LLM: every requirement settles through the deterministic `DefaultDriver` (`INFO-070`).
+- Real LLM path: `export OPENAI_API_KEY=sk-...` then `python3 -m dhc.ui.terminal` — wired runtime, real LLM driver (`INFO-070`).
 
 ## Value demonstration
 

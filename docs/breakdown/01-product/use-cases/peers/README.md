@@ -12,7 +12,7 @@ the exchange.
 - Agent-to-agent behaviors outside a delegation edge.
 
 ## Excludes
-- Parent-mediated coordination — `delegation/`.
+- Parent-mediated coordination — `relationship/`.
 - The artifact contract the handoffs rely on, which stays a public interface one layer up in Product.
 
 ## Contents

@@ -22,4 +22,5 @@ The concrete materialization: files, modules, and code layout. Facts here answer
 <!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
 - **INFO-055** [Module map](module-map.md) — What each module owns - the layout is the architecture
 - **INFO-059** [State view model](state-view-model.md) — The operator's state view-model — what ui/state.py builds from the runtime, the enum-driven event-kind mapping, and the token/cost provenance seams that feed it
+- **INFO-066** [Unwired modules](unwired-modules.md) — Modules present and tested but not composed into build_runtime — trace persistence and the superseded structured-prompt composition
 <!-- pb:index:end -->

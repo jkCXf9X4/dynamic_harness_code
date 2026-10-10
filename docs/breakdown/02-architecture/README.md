@@ -29,4 +29,7 @@ The organizing design: how the dhc runtime's parts fit and interact. Facts here 
 - **INFO-060** [The time base](the-time-base.md) — The runtime's clock discipline — every duration comparison runs on time.monotonic(); informational timestamps stay wall-clock
 - **INFO-061** [Guardrail placement](guardrail-placement.md) — The general three-part placement model for guardrails: normative (context-in), operational (pump-evaluated tripwires), reactions (executed in the parent's REPL)
 - **INFO-062** [Pump and message bus dynamics](pump-and-message-bus-dynamics.md) — How the pump and the message bus behave over time — demand-driven stepping, the between-actions interleave of one pump iteration, park servicing, and where the pump and the bus meet
+- **INFO-063** [Checkpointing and resumability](checkpointing-and-resumability.md) — Two checkpoint mechanisms by design — agent-owned workspace snapshots in the fabrication kit and the operator's on-disk checkpoint store — each resuming a different thing
+- **INFO-064** [The driver seam](the-driver-seam.md) — How decide gets its answer — the swappable driver, workspace-swappable prompt assembly, provider calls with retry and timeout containment, and usage recording at the seam
+- **INFO-065** [The configuration model](the-configuration-model.md) — Two coexisting layers — layered harness.json sections and legacy env settings — what each owns, how they merge, and how safety ceilings reach the caps watchdog
 <!-- pb:index:end -->
