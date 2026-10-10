@@ -29,7 +29,7 @@ and a task contract before code changes begin (change pipeline).
   snapshot view-model (`AgentNode`) quietly loses that history. There is no
   compile-time or test-time link between the enum and the snapshot's
   branches.
-- **The refactor made the seam visible.** Decision record `0007` (agent
+- **The refactor made the seam visible.** Decision record `IMD-001` (agent
   module separation) moved the loop/caps/integrity/context concerns out of
   `runtime.py` and listed this as an open hazard; the stringly-typed branch is
   the one place where the event contract is duplicated by hand.
@@ -81,5 +81,5 @@ and a task contract before code changes begin (change pipeline).
 - The event-stream discipline (FIFO, at-most-once, persist-before-execute) —
   `INFO-048`/`INFO-051`, unchanged.
 - The `_MemoryBus` drain race — a sequenced follow-on to decision record
-  `0007`, not this candidate.
+  `IMD-001`, not this candidate.
 - The wall-clock base mix (IMP-003) and the inert token fields (IMP-004).

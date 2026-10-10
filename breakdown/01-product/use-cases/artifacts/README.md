@@ -17,6 +17,7 @@ findings, and tracing a failure through the records it leaves.
 ## Contents
 
 <!-- pb:index:start -->
+<!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
 - **INFO-006** [Publish and consume artifacts](publish-and-consume-artifacts.md) — Findings persist as immutable content-addressed artifacts that consumers pull headline-summary-report on demand
 - **INFO-027** [Trace a failure to its provenance without re-running](trace-a-failure-to-its-provenance-without-re-running.md) — A queryable event trail ties each agent to its actions and artifacts, so a failure is diagnosed by reading records only
 <!-- pb:index:end -->

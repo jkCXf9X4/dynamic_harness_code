@@ -18,6 +18,7 @@ or embed it behind an API.
 ## Contents
 
 <!-- pb:index:start -->
+<!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
 - **INFO-008** [Host the runtime in a container](host-the-runtime-in-a-container.md) — An operator runs the dhc runtime inside Docker or Podman as the outer security boundary
 - **INFO-025** [Embed the runtime in a host process behind an API](embed-the-runtime-in-a-host-process-behind-an-api.md) — A host application can construct and drive the runtime through a committed API surface, decoupling the harness from any UI
 <!-- pb:index:end -->

@@ -1,8 +1,6 @@
 ---
 title: The V-model
 summary: Turn-as-code decomposition and self-verification — decompose recursively, self-verify each turn
-date: 2026-10-06
-status: current
 ---
 
 # The V-model
@@ -19,6 +17,7 @@ How work is shaped before and within the mesh: recursive decomposition into chil
 ## Contents
 
 <!-- pb:index:start -->
+<!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
 - **INFO-003** [Self-verify a turn](self-verify-a-turn.md) — Each action block analyzes its requirement, implements, verifies against the parents acceptance criteria, and reports
 - **INFO-004** [Decompose a task recursively](decompose-a-task-recursively.md) — A parent writes delegation code that spawns encapsulated child workers and receives summaries plus artifact IDs
 <!-- pb:index:end -->

@@ -52,7 +52,7 @@ keeps agent turns few.
    results, and the code of every action — is an immutable, content-addressed
    artifact: a handed-off claim cannot silently change, and its id proves what
    it contains. How that is delivered — the protocol, the tiers, the storage —
-   is architecture, not vision (`INFO-006`, `0014`).
+   is architecture, not vision (`INFO-006`, `AD-008`).
 8. **Progressive disclosure.** Artifacts expose headline → summary → report tiers; consumers
    pull detail on demand.
 9. **Per-agent persistent REPL.** Every agent works in a persistent computational workspace of its
@@ -62,14 +62,14 @@ keeps agent turns few.
     core is a small, stable set of guarantees — lifecycle, settlement,
     containment, caps, event discipline, and one communication primitive:
     any agent can `send` to any other by identity, and the message is
-    guaranteed to reach the recipient's awareness (`0015`). Whatever an
+    guaranteed to reach the recipient's awareness (`AD-009`). Whatever an
     operator needs — persisting, observing, or rendering state — and every
     communication pattern *above* direct messaging (rooms, escalation
     routing, operator questions) is tooling composed around that core,
     one-way dependent on it, never inside it: the agent's communication
     beyond the primitive is its own composition choice. Where the line
-    falls for a new concern is decided in the architecture (`INFO-053`,
-    `0014`, `0015`).
+    falls for a new concern is decided in the architecture (`INFO-054`,
+    `AD-008`, `AD-009`).
 
 ## Inspirations
 

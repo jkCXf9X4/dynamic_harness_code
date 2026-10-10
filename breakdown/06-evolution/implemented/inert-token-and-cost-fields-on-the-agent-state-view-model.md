@@ -19,7 +19,7 @@ and a task contract before code changes begin (change pipeline).
   (`AgentNode`, lines 78–95) carries `tokens`, `messages`, `context_tokens`,
   `prompt_tokens`, `completion_tokens`, `cached_tokens`, `cost_usd`, and
   `cum_cost_usd` — all defaulting to zero. The scoping brief (run
-  `261008_105638_6a18`, §2) and decision record `0007` (agent module
+  `261008_105638_6a18`, §2) and decision record `IMD-001` (agent module
   separation) list them as inert: no code path in `src/dhc/framework/` or
   `src/dhc/wiring.py` ever assigns them.
 - **The data already exists at the driver boundary.** `LLMResponse`
@@ -87,6 +87,6 @@ and a task contract before code changes begin (change pipeline).
 - The rot-detection *policy* (what to do with a token signal) — `INFO-021` on
   adoption, not this candidate.
 - The `_MemoryBus` drain race — a sequenced follow-on to decision record
-  `0007`, not this candidate.
+  `IMD-001`, not this candidate.
 - The stringly-typed event kinds (IMP-002) and the wall-clock base mix
   (IMP-003).

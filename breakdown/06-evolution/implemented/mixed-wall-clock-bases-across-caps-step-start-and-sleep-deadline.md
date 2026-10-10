@@ -16,7 +16,7 @@ and a task contract before code changes begin (change pipeline).
 ## Why — pain and evidence
 
 - **Three wall-clock bases coexist.** The scoping brief (run
-  `261008_105638_6a18`, §2 coupling point 6) and decision record `0007`
+  `261008_105638_6a18`, §2 coupling point 6) and decision record `IMD-001`
   (agent module separation) list the mix: `time.time` at the caps wall-clock
   check (`src/dhc/framework/caps.py:85`, `time.time() - started_ts >
   timeout_seconds`), the step start (`src/dhc/framework/pump.py:277`,
@@ -31,7 +31,7 @@ and a task contract before code changes begin (change pipeline).
   stops tripping) and a forward jump can *trip* a cap that was not actually
   exceeded. `time.monotonic` is immune to this; the sleep deadline already
   uses it.
-- **The refactor made the seam visible.** Decision record `0007` moved the
+- **The refactor made the seam visible.** Decision record `IMD-001` moved the
   caps predicate into `caps.py` and the step start into `loop.py`, so the two
   bases now sit in two modules that should agree on which clock a "step" and
   a "timeout" are measured against.
@@ -85,7 +85,7 @@ and a task contract before code changes begin (change pipeline).
 
 ## Excludes
 - The `_MemoryBus` drain race — a sequenced follow-on to decision record
-  `0007`, not this candidate.
+  `IMD-001`, not this candidate.
 - The stringly-typed event kinds (IMP-002) and the inert token fields
   (IMP-004).
 - The ceiling-cap *defaults* (the values) — owned by `config.py`/`SafetyConfig`,

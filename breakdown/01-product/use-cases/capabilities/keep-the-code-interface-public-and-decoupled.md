@@ -9,7 +9,7 @@ status: draft
 
 # Keep the code interface public and decoupled
 
-- The stance: the code interface — the in-code capability surface agent code programs against (`INFO-029`) — is part of the public interface, not an internal harness detail.
+- The stance: the code interface — the in-code capability surface agent code programs against — is part of the public interface, not an internal harness detail.
 - Holding the code interface public keeps it decoupled from the harness, so agents can continue developing it as a separate entity.
 - Its first public pieces are the tool extension (`INFO-007`) and the minimal execution-core contract (`INFO-037`).
 
@@ -18,4 +18,3 @@ status: draft
 
 ## Excludes
 - The harness machinery the code interface stays decoupled from — organized in `02-architecture/`.
-- The full capability-surface candidate — `INFO-029`.

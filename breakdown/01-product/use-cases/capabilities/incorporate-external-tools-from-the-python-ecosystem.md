@@ -13,7 +13,7 @@ status: draft
 - The harness stays a substrate — it adopts none of them, so a current technology never becomes a built-in the runtime must chase.
 - Incorporation is agent-side and user-side: a capability arrives as a Python package an agent or user loads mid-run, through the extension contract (`INFO-007`).
 - Quick adaptation is the committed behavior: new external development is usable in the same session it appears in, with no harness change and no waiting.
-- The in-code capability surface (`INFO-029`) is the mechanism incorporation flows through — loadable tools and free verbs, not new harness plumbing.
+- The in-code capability surface is the mechanism incorporation flows through — loadable tools and free verbs, not new harness plumbing.
 - Scope today: retrieval (RAG), web search and manipulation, and memory architectures — the package categories the use cases name.
 
 ## Owns
@@ -21,4 +21,3 @@ status: draft
 
 ## Excludes
 - The extension contract incorporation loads packages through — `INFO-007`.
-- The in-code capability surface candidate carrying the mechanism — `INFO-029`.

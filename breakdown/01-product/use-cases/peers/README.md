@@ -18,6 +18,7 @@ the exchange.
 ## Contents
 
 <!-- pb:index:start -->
+<!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
 - **INFO-012** [Hand off artifacts between siblings](hand-off-artifacts-between-siblings.md) — A sibling passes its published artifact directly to another sibling as input, without routing through the parent
 - **INFO-015** [Message another agent directly](message-another-agent-directly.md) — Any two agents can open a direct channel by identity and exchange request-reply traffic without a parent mediating
 - **INFO-016** [Meet in a shared room](meet-in-a-shared-room.md) — Agents join a shared room where every posted message is visible to all members and any member can reply

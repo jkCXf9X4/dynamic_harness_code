@@ -14,7 +14,7 @@ status: current
 - Membership is visible: an agent can see who else is in the room, so a thread can pull in participants ad hoc.
 - Room traffic persists for the room's lifetime, so an agent joining late can catch up on what it missed.
 - The room complements direct messaging: broadcast to the group when the audience is "whoever can help", point-to-point when it is one agent (`INFO-015`).
-- Boundary (decision 0015): rooms are a composed *policy*, not framework machinery — tooling over the core directed-message primitive, removable without changing what the core guarantees, so the agent keeps full control of which communication patterns its stack carries.
+- Boundary (decision AD-009): rooms are a composed *policy*, not framework machinery — tooling over the core directed-message primitive, removable without changing what the core guarantees, so the agent keeps full control of which communication patterns its stack carries.
 
 ## Owns
 - The meeting-room channel: a shared space agents join, post to, and read from, visible to every member.

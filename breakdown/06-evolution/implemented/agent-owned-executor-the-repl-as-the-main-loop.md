@@ -23,9 +23,9 @@ workspace.
 - **Status: implemented.** This IMP is adopted and in the code; it lives under
   `implemented/` as the historical record of what was scoped and done, and is
   no longer tracked as open work.
-- **Decision records** `0001`–`0007` lock the scoping decisions D1–D5, the
+- **Decision records** `AD-001`–`AD-006` and `IMD-001` lock the scoping decisions D1–D5, the
   `INFO-048` partial reversal, and the agent-module separation; the adopted
-  task contract is `imp001-adopted-task-contract`.
+  task contract is `TC-001`.
 - **Code commits** `7832c45` → `54ed8db` (IMP-001 steps 1–6): resumable-run
   primitives, the fabrication kit, `_pump_agent` under the four hard gates,
   `yield Await/Poll/Sleep` servicing, the context/guardrail surface +
@@ -178,7 +178,7 @@ policy mid-run, no custom hooks).
 - Revised `INFO-001` (rot instrumentation invisible-by-default, authorable by
   explicit opt-in), `INFO-050` (the REPL owns the loop and its lifecycle),
   `INFO-051` (event-stream consumption in-loop, discipline runtime-owned).
-- Recorded the `INFO-048` partial reversal in decision record `0006` —
+- Recorded the `INFO-048` partial reversal in decision record `AD-006` —
   consumption moves into the loop, the reason for the original ruling
   (interpreter-level locks, private namespace) survives because discipline
   stays external.

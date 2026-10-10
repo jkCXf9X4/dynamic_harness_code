@@ -17,6 +17,7 @@ How actors meet the dhc runtime: the action loop, V-model decomposition and self
 ## Contents
 
 <!-- pb:index:start -->
+<!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
 - [Artifacts](artifacts/README.md) — The durable, content-addressed medium agents publish, consume, and trace
 - [Capabilities and the primitive surface](capabilities/README.md) — Extending what agents can do, and the minimal execution-core contract behind it
 - [Communication](communication/README.md) — How messages travel after spawn — await, poll, callbacks, completion scheduling, and settlement

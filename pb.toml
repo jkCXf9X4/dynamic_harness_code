@@ -4,19 +4,18 @@
 # The installed skill bundles are reference material, not breakdown nodes.
 # Runtime/venv directories are not breakdown state and would otherwise trip
 # the leaf front-matter checks (generated artifacts, vendored docs).
-exclude_dirs = [".agents", ".dhc", ".dynamic-harness", ".venv", ".pytest_cache", "src"]
+exclude_dirs = [".agents", ".dhc", ".dynamic-harness", ".venv", ".pytest_cache", "src", "tests", "examples"]
+# The breakdown root is the repo root itself: record `artifacts:` resolve
+# against it (src/, tests/, examples/ live here, not in a parent).
+repo_root = "."
+# Cold-storage decision archive (primary model): records at the zip root,
+# tombstones under its deprecated/ namespace, reached only via `pb archive`.
+archive = "docs/archive/archive.zip"
 
 [nodes]
-# Reference material attached to a candidate (INFO-029), not a leaf: no
-# identity, no index presence; ID citations inside still resolve.
 # AGENTS.md is agent-harness configuration at the root, not a leaf.
-# The pre-studies mockups folder is code sketches plus their requirements doc
-# — reference material riding with the sketches it governs, not breakdown
-# state.
-exempt = ["give-agents-an-in-code-capability-surface.verbs.md", "commit-to-a-minimal-execution-core-contract.analysis.md", "AGENTS.md", "mockups"]
+exempt = ["AGENTS.md"]
 
 [ids]
 # Planned handles cited by leaves before their own leaf/record files land.
-# INFO-029 is the in-code capability-surface candidate. (INFO-037 and INFO-049
-# formerly lived here but now have real leaves.)
-reserved_ids = ["INFO-029"]
+reserved_ids = []
