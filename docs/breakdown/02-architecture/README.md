@@ -28,4 +28,5 @@ The organizing design: how the dhc runtime's parts fit and interact. Facts here 
 - **INFO-058** [Runtime composition](runtime-composition.md) — How the wired runtime fits together — operator door, worker threads, event bus, and composed operator tooling
 - **INFO-060** [The time base](the-time-base.md) — The runtime's clock discipline — every duration comparison runs on time.monotonic(); informational timestamps stay wall-clock
 - **INFO-061** [Guardrail placement](guardrail-placement.md) — The general three-part placement model for guardrails: normative (context-in), operational (pump-evaluated tripwires), reactions (executed in the parent's REPL)
+- **INFO-062** [Pump and message bus dynamics](pump-and-message-bus-dynamics.md) — How the pump and the message bus behave over time — demand-driven stepping, the between-actions interleave of one pump iteration, park servicing, and where the pump and the bus meet
 <!-- pb:index:end -->
