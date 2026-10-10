@@ -9,14 +9,19 @@ status: current
 
 # Extend capabilities with agent tools
 
-- Agents extend the capability surface themselves, outside the harness release cycle (`INFO-001`).
-- The harness is a substrate, not a tool set: capabilities arrive as artifacts and code, not built-ins.
-- Harness plumbing stays runtime-owned and invisible — instrumentation is never agent-authored.
-- Loaded tools persist in the agent's own REPL, so a capability the agent adds stays available (`INFO-050`).
+- **Agent-side extension**
+  - Agents extend capability surface themselves, outside harness release cycle (`INFO-001`).
+- **Substrate, not tool set**
+  - Capabilities arrive as artifacts and code, not built-ins.
+- **Runtime-owned plumbing**
+  - Harness plumbing stays runtime-owned and invisible. Instrumentation never agent-authored.
+- **Loaded tools persist**
+  - Loaded tools persist in agent's own REPL (`INFO-050`).
+  - Capability agent adds stays available.
 
 ## Owns
-- The agent-developed-tools extension contract.
+- Agent-developed-tools extension contract.
 
 ## Excludes
-- The core action loop the tools extend — `INFO-002`.
-- The hosting boundary the extensions live inside — `INFO-008`.
+- Core action loop tools extend — `INFO-002`.
+- Hosting boundary extensions live inside — `INFO-008`.

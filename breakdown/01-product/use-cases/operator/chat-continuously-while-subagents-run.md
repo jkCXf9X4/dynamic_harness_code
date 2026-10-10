@@ -9,14 +9,20 @@ status: current
 
 # Chat continuously while subagents run
 
-- The operator's chat with the root stays live while the hierarchy below runs: running subagents never block message delivery (`INFO-017`, `INFO-014`).
-- A message the operator sends while the root is mid-turn steers immediately: it reaches the current turn and can redirect running work.
-- The root's responses stream back continuously instead of arriving only as a final result, pulled on demand through the artifact tiers (`INFO-006`).
+- **Chat stays live**
+  - Operator's chat with root stays live while hierarchy below runs.
+  - Running subagents never block message delivery (`INFO-017`, `INFO-014`).
+- **Mid-turn steering**
+  - Message sent while root mid-turn steers immediately.
+  - Reaches current turn, can redirect running work.
+- **Streaming responses**
+  - Root's responses stream back continuously, not only final result.
+  - Pulled on demand through artifact tiers (`INFO-006`).
 
 ## Owns
-- Continuous operator messaging during a running hierarchy: delivery while mid-turn (steering) and streaming responses.
+- Continuous operator messaging during running hierarchy: delivery while mid-turn (steering) and streaming responses.
 
 ## Excludes
-- The operator-to-root request-result door itself — `INFO-017`.
-- Parent liveness that keeps the channels open — `INFO-014`.
-- Artifact publication tiers the streaming rides on — `INFO-006`.
+- Operator-to-root request-result door itself — `INFO-017`.
+- Parent liveness keeping channels open — `INFO-014`.
+- Artifact publication tiers streaming rides on — `INFO-006`.

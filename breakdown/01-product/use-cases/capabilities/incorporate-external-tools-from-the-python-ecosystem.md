@@ -9,15 +9,25 @@ status: draft
 
 # Incorporate external tools from the Python ecosystem
 
-- The ecosystem moves faster than any release cycle: RAG stacks, web search and manipulation APIs, and memory architectures appear and shift between harness releases.
-- The harness stays a substrate — it adopts none of them, so a current technology never becomes a built-in the runtime must chase.
-- Incorporation is agent-side and user-side: a capability arrives as a Python package an agent or user loads mid-run, through the extension contract (`INFO-007`).
-- Quick adaptation is the committed behavior: new external development is usable in the same session it appears in, with no harness change and no waiting.
-- The in-code capability surface is the mechanism incorporation flows through — loadable tools and free verbs, not new harness plumbing.
-- Scope today: retrieval (RAG), web search and manipulation, and memory architectures — the package categories the use cases name.
+- **Ecosystem moves faster**
+  - Ecosystem moves faster than any release cycle.
+  - RAG stacks, web search and manipulation APIs, memory architectures appear and shift between harness releases.
+- **Harness stays substrate**
+  - Harness adopts none of them.
+  - Current technology never becomes built-in runtime must chase.
+- **Agent-side, user-side incorporation**
+  - Capability arrives as Python package agent or user loads mid-run, through extension contract (`INFO-007`).
+- **Quick adaptation committed**
+  - New external development usable in same session it appears in.
+  - No harness change, no waiting.
+- **In-code capability surface**
+  - Mechanism incorporation flows through: loadable tools and free verbs, not new harness plumbing.
+- **Scope today**
+  - Retrieval (RAG), web search and manipulation, memory architectures.
+  - Package categories use cases name.
 
 ## Owns
-- The external-tool-incorporation use cases: RAG, web search/manipulation, and memory architectures incorporated from the Python ecosystem, agent-side and user-side.
+- External-tool-incorporation use cases: RAG, web search/manipulation, memory architectures incorporated from Python ecosystem, agent-side and user-side.
 
 ## Excludes
-- The extension contract incorporation loads packages through — `INFO-007`.
+- Extension contract incorporation loads packages through — `INFO-007`.

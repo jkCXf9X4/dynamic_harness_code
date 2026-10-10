@@ -11,30 +11,45 @@ status: draft
 
 ## The gap
 
-- The pain: when a run fails, triage today re-derives what happened by re-executing, because there is no queryable cross-run record tying agent → actions → results.
-- What already survives: every action's code and results persist as immutable artifacts (`INFO-002`, `INFO-006`) — the raw material for provenance exists but is not queryable as a trail.
+- **Pain**
+  - Run fails: triage today re-derives what happened by re-executing.
+  - No queryable cross-run record ties agent, action, result.
+- **What survives**
+  - Every action's code and results persist as immutable artifacts (`INFO-002`, `INFO-006`).
+  - Raw material for provenance exists.
+  - Not queryable as trail.
 
 ## The candidate
 
-- A queryable provenance trail — which agent produced which artifact from which delegation — so a failure is diagnosed by reading records only.
+- **Queryable provenance trail**
+  - Which agent produced which artifact from which delegation.
+  - Failure diagnosed by reading records only.
 
 ## The design
 
-- The trail is a boundary event log: five event kinds carrying causal ids, so concurrent work reconstructs as a DAG, not a sequence (`INFO-049`).
-- Large payloads are traced by reference — the trail carries content hashes and artifact references, never the payload itself (`INFO-006`).
-- Instrumentation is boundary-only: the trace records what crossed the boundary, never the internals of executed code — operations, assignments, filesystem and network accesses stay untraced unless they are part of an emitted output. The action space stays unconstrained while the trace stays manageable.
-- Terminal states are typed — completed, failed, cancelled, timeout — so failures are first-class outcomes, not generic errors (`INFO-005`, `INFO-032`, `INFO-034`).
+- **Boundary event log**
+  - Five event kinds carry causal ids (`INFO-049`).
+  - Concurrent work reconstructs as DAG, not sequence.
+- **By-reference payloads**
+  - Trail carries content hashes and artifact references, never payload itself (`INFO-006`).
+- **Boundary-only instrumentation**
+  - Trace records what crossed boundary, never internals of executed code.
+  - Operations, assignments, filesystem and network accesses stay untraced unless part of emitted output.
+  - Action space stays unconstrained. Trace stays manageable.
+- **Typed terminal states**
+  - Completed, failed, cancelled, timeout (`INFO-005`, `INFO-032`, `INFO-034`).
+  - Failures first-class outcomes, not generic errors.
 
 ## Notes
 
-- Full analysis: the `commit-to-a-minimal-execution-core-contract` sidecar, attached to `INFO-037`.
-- Evidence from practice: immutable records make failure analysis a read-only query.
+- Full analysis: `commit-to-a-minimal-execution-core-contract` sidecar, attached to `INFO-037`.
+- Evidence from practice: immutable records make failure analysis read-only query.
 
 ## Owns
-- The provenance-trail candidate: a queryable run trace for failure triage without re-running.
+- Provenance-trail candidate: queryable run trace for failure triage without re-running.
 
 ## Excludes
-- The event-log data model — vocabulary, causal ids, by-reference payloads — `INFO-049`.
+- Event-log data model: vocabulary, causal ids, by-reference payloads — `INFO-049`.
 - Artifact persistence — `INFO-006`.
 - Action persistence — `INFO-002`.
 - Crash surfacing — `INFO-005`.

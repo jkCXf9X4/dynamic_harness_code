@@ -9,16 +9,31 @@ status: current
 
 # Message another agent directly
 
-- Any two agents can open a direct channel: the sender addresses the recipient by identity, sends a message, and receives a reply — no parent mediating the exchange (`INFO-004`).
-- The channel is point-to-point: only the two parties see the traffic; no room and no third agent is involved.
-- A message can carry an artifact ID as its payload, so direct messaging composes with the artifact contract (`INFO-006`).
-- In a delegation tree this appears as a sibling handoff — the delegation-pattern instance of the same channel (`INFO-012`).
-- Boundary (decision AD-009): the *primitive* is framework — `send(recipient_id, body)` is a core namespace action emitting a receiver-addressed `message_sent` event on the recipient's own stream, so a direct message reaches the recipient's awareness (digest, recent context, `events` tool) with no channel installed. The inbox read-state view (unread counts, read marking) is tooling composed on top; the agent chooses whether to use it.
+- **Direct channel by identity**
+  - Sender addresses recipient by identity.
+  - Sends message, receives reply.
+  - No parent mediating exchange (`INFO-004`).
+- **Point-to-point**
+  - Only two parties see traffic.
+  - No room involved. No third agent involved.
+- **Artifact ID payload**
+  - Message can carry artifact ID as payload (`INFO-006`).
+  - Direct messaging composes with artifact contract.
+- **Delegation-tree instance**
+  - In delegation tree appears as sibling handoff (`INFO-012`).
+  - Delegation-pattern instance of same channel.
+- **Boundary (decision `AD-009`)**
+  - *Primitive* is framework: `send(recipient_id, body)` core namespace action.
+  - Emits receiver-addressed `message_sent` event on recipient's own stream.
+  - Direct message reaches recipient's awareness (digest, recent context, `events` tool).
+  - No channel installed.
+  - Inbox read-state view (unread counts, read marking): tooling composed on top.
+  - Agent chooses whether to use it.
 
 ## Owns
-- Direct agent-to-agent messaging: any agent can address any other by identity and exchange request-reply traffic without a parent mediating.
+- Direct agent-to-agent messaging: any agent can address any other by identity, exchange request-reply traffic without parent mediating.
 
 ## Excludes
-- The delegation-pipeline instance, sibling artifact handoff — `INFO-012`.
-- Parent-mediated reporting, the default route — `INFO-006`.
-- The shared-room channel, many-to-many — `INFO-016`.
+- Delegation-pipeline instance, sibling artifact handoff — `INFO-012`.
+- Parent-mediated reporting, default route — `INFO-006`.
+- Shared-room channel, many-to-many — `INFO-016`.

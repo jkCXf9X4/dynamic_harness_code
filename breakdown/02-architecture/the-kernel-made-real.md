@@ -14,7 +14,7 @@ status: current
 - **A yield is a checkpoint.** Between yields the workspace is consistent, so the pump snapshots cheaply; cancellation lands between steps; per-step budgeting is exact instead of per-turn.
 - **The op vocabulary is split by cost.** Bounded, synchronous operations are direct workspace calls (`run_block`, inbox drain, guardrail/budget edits). Indefinite or off-thread operations are `yield` requests serviced by the pump: `yield Await(handle)`, `yield Poll(handle)`, `yield Sleep(t)`. A parent can `yield Await(child)` without consuming step budget.
 - **The four hard gates are pump behavior, not workspace variables:** (1) settlement at-most-once, (2) crash containment / blast radius, (3) outer ceiling caps (wall-clock, step count, workspace size, child count, message rate), (4) cancellation grace. A degrading agent can break itself; it can never break the mesh.
-- **The default `__runner` replicates the committed turn loop exactly** (decide → run_block → observe → settle); backward compatibility is "the default fabrication," not a second execution path. `ensure_fabrication` re-seeds any fabrication the agent broke or deleted.
+- **The default `__runner` replicates the committed turn loop exactly** (decide, then run_block, then observe, then settle); backward compatibility is "the default fabrication," not a second execution path. `ensure_fabrication` re-seeds any fabrication the agent broke or deleted.
 - This is the "kernel made real" (`INFO-052`): orchestration intelligence moves into the workspace; the platform keeps only the invariants.
 
 ## Owns

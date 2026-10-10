@@ -10,12 +10,22 @@ status: current
 # Synchronize with a child on demand
 
 - Spawning is non-blocking: the delegation action returns a task handle immediately, and the parent continues (`INFO-009`).
-- Awaiting the handle blocks the parent until the child reaches a terminal state — the basic fork/join pattern: fan out, run independently, join, synthesize (`INFO-009`).
-- Awaiting is ensure-terminal, not first-observation: if a completion callback already processed the child's result, awaiting afterwards still succeeds (`INFO-033`).
-- The parent chooses per child when to synchronize: immediately, only when the result becomes necessary, or never — a callback instead (`INFO-033`).
+- **Await blocks until terminal** (`INFO-009`).
+  - Awaiting the handle blocks the parent until the child reaches a terminal state.
+  - Basic fork/join pattern: fan out, run independently, join, synthesize.
+- **Await is ensure-terminal, not first observation** (`INFO-033`).
+  - A completion callback already processed the child's result.
+  - Awaiting afterwards still succeeds.
+- **Parent chooses per child when to synchronize** (`INFO-033`).
+  - Immediately.
+  - Only when the result becomes necessary.
+  - Never: a callback instead.
 
 ## Owns
-- The await primitive's semantics: non-blocking spawn, blocking join, ensure-terminal-not-first-observation.
+- **Await primitive semantics.**
+  - Non-blocking spawn.
+  - Blocking join.
+  - Ensure-terminal, not first observation.
 
 ## Excludes
 - Parent liveness while children run — `INFO-014`.

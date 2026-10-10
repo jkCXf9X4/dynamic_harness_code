@@ -9,8 +9,12 @@ status: current
 
 # Minimalistic TUI
 
-- The TUI is as small as possible: it is just a simple chat — a scrolling message stream and an input line — with no extra panes, menus, or dashboards.
-- As much of context info, debug info and additional information as possible lives in persistent files.
+- **Minimal chat**
+  - TUI as small as possible: simple chat.
+  - Scrolling message stream and input line.
+  - No extra panes, menus, dashboards.
+- **Persistent files**
+  - Context info, debug info, additional information live in persistent files as much as possible.
 
 ## Owns
-- The operator-facing TUI shell: a chat-only view
+- Operator-facing TUI shell: chat-only view.

@@ -9,17 +9,32 @@ status: current
 
 # Meet in a shared room
 
-- Agents join a common room where every posted message is visible to all members; the room is the medium, not any pair's channel.
-- Posting is many-to-many: an agent posts an update, a question, or an artifact ID, and any other member — not a fixed recipient — can pick it up and reply (`INFO-006`).
-- Membership is visible: an agent can see who else is in the room, so a thread can pull in participants ad hoc.
-- Room traffic persists for the room's lifetime, so an agent joining late can catch up on what it missed.
-- The room complements direct messaging: broadcast to the group when the audience is "whoever can help", point-to-point when it is one agent (`INFO-015`).
-- Boundary (decision AD-009): rooms are a composed *policy*, not framework machinery — tooling over the core directed-message primitive, removable without changing what the core guarantees, so the agent keeps full control of which communication patterns its stack carries.
+- **Room is the medium**
+  - Agents join common room.
+  - Every posted message visible to all members.
+  - Not any pair's channel.
+- **Many-to-many posting**
+  - Agent posts update, question, or artifact ID.
+  - Any other member, not fixed recipient, can pick up and reply (`INFO-006`).
+- **Visible membership**
+  - Agent sees who else is in room.
+  - Thread can pull in participants ad hoc.
+- **Traffic persists**
+  - Room traffic persists for room's lifetime.
+  - Agent joining late catches up on what it missed.
+- **Complements direct messaging**
+  - Broadcast to group when audience is "whoever can help".
+  - Point-to-point when one agent (`INFO-015`).
+- **Boundary (decision `AD-009`)**
+  - Rooms are composed *policy*, not framework machinery.
+  - Tooling over core directed-message primitive.
+  - Removable without changing what core guarantees.
+  - Agent keeps full control of which communication patterns its stack carries.
 
 ## Owns
-- The meeting-room channel: a shared space agents join, post to, and read from, visible to every member.
+- Meeting-room channel: shared space agents join, post to, read from, visible to every member.
 
 ## Excludes
 - Direct point-to-point messaging — `INFO-015`.
-- Pull-based artifact consumption, which delivers content on demand without a room — `INFO-006`.
+- Pull-based artifact consumption, delivering content on demand without a room — `INFO-006`.
 - Broadcast of one requirement to spawned children, a delegation pattern — `INFO-013`.

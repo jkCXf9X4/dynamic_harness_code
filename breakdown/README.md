@@ -17,7 +17,7 @@ below, **history** in the dated decision stream (`decisions/`), and
 - [`03-implementation/`](03-implementation/README.md) — where it lives: modules, files, code layout, code-level facts.
 - [`04-verification/`](04-verification/README.md) — how we know: test strategy, acceptance criteria, evidence.
 - [`05-operation/`](05-operation/README.md) — how it runs: install, quick start, entry points, demos, runbooks.
-- [`06-evolution/`](06-evolution/README.md) — what might change: IMP candidates (selected → implemented); never current state.
+- [`06-evolution/`](06-evolution/README.md) — what might change: IMP candidates (selected, then implemented); never current state.
 - `decisions/` — why it changed: the flat, dated decision stream — history, never current state.
 
 Code, tests, and examples sit outside this tree; `pb.toml` scopes what counts.
@@ -45,17 +45,17 @@ guides disagree, this README's rule wins.
 - `AD-` / `PD-` / `IMD-` / `VD-` / `OD-` — decision records by layer:
   architecture, product, implementation, verification, operation.
 - `TC-` — task contracts. `IMP-` — improvement candidates (`06-evolution/`:
-  selected → implemented).
+  selected, then implemented).
 - Records and leaves are cited by id, never by path.
-- Legacy: `D1`–`D5` → `AD-001..005`; `G-xx` → `PD-001`; `H-xx` → `AD-007` /
+- Legacy: `D1`–`D5` became `AD-001..005`; `G-xx` became `PD-001`; `H-xx` became `AD-007` /
   `IMD-003` / `PD-002` / `IMD-004`.
 
 ## Routing an Edit
 
-- Current-state fact ("X is …") → its layer leaf.
-- Dated choice or event ("on 2026-10-07, X changed") → a `decisions/` record.
-- Open item or progress → the IMP's `status:`, never a leaf.
-- Idea → an IMP candidate under `06-evolution/selected/`.
+- Current-state fact ("X is …") — its layer leaf.
+- Dated choice or event ("on 2026-10-07, X changed") — a `decisions/` record.
+- Open item or progress — the IMP's `status:`, never a leaf.
+- Idea — an IMP candidate under `06-evolution/selected/`.
 - Full protocol: the `product-breakdown` skill
   (`.agents/skills/product-breakdown/guidelines/storage-rules.md`).
 

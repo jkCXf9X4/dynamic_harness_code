@@ -9,10 +9,18 @@ status: current
 
 # Re-decompose from within a child
 
-- For a complex problem, the subtask shape is not knowable up front, so a child that discovers its allocated requirement was under-scoped writes its own delegation code mid-task (`INFO-004`).
-- The child becomes a parent for its grandchildren, with the same encapsulated context contract one level deeper (`INFO-004`).
-- The original parent only sees the child's summary and artifact IDs; the grandchild tree stays invisible to it.
-- Depth is unbounded in principle: every agent, at any level, runs the same action model (`INFO-002`).
+- **Subtask shape not knowable up front** (`INFO-004`).
+  - Complex problem: subtask shape is not knowable up front.
+  - Child discovers its allocated requirement was under-scoped.
+  - Child writes its own delegation code mid-task.
+- **Child becomes parent one level deeper** (`INFO-004`).
+  - Child becomes a parent for its grandchildren.
+  - Same encapsulated context contract, one level deeper.
+- **Original parent visibility.**
+  - Original parent only sees the child's summary and artifact IDs.
+  - The grandchild tree stays invisible to it.
+- **Depth is unbounded in principle.**
+  - Every agent, at any level, runs the same action model (`INFO-002`).
 
 ## Owns
 - Child-initiated, in-task re-decomposition beyond one delegation hop.

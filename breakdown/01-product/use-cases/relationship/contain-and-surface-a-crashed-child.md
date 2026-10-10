@@ -9,8 +9,9 @@ status: current
 
 # Contain and surface a crashed child
 
-- A crashed child is contained and never takes down a sibling or the parent (`INFO-001`).
-- The crash surfaces to the parent as a failed result — one distinguishable terminal state among completed, failed, cancelled, and timeout (`INFO-032`).
+- Crashed child is contained, never takes down a sibling or the parent (`INFO-001`).
+- **Crash surfaces to the parent as a failed result** (`INFO-032`).
+  - One distinguishable terminal state among completed, failed, cancelled, timeout.
 
 ## Owns
 - Crash containment and failure surfacing.

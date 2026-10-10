@@ -9,15 +9,21 @@ status: current
 
 # Run a coded action
 
-- Every agent turn emits one Python block as its whole action (`INFO-001`).
-- The runtime persists the block as an immutable, content-addressed artifact before execution.
-- The block executes against the agent's persistent REPL (`INFO-050`).
-- The action's result returns to the caller as a summary plus artifact IDs, not raw logs.
-- One expressive block replaces N tool-call turns: loops, fan-out, transforms, and error handling happen inside the action.
+- **One block per turn**
+  - Every agent turn emits one Python block as whole action (`INFO-001`).
+- **Persist before execution**
+  - Runtime persists block as immutable, content-addressed artifact before execution.
+- **Persistent REPL target**
+  - Block executes against agent's persistent REPL (`INFO-050`).
+- **Result returns compact**
+  - Action's result returns to caller as summary plus artifact IDs, not raw logs.
+- **One expressive block**
+  - One expressive block replaces N tool-call turns.
+  - Loops, fan-out, transforms, error handling happen inside action.
 
 ## Owns
-- The turn-as-code action contract: emit, persist, execute, and return.
+- Turn-as-code action contract: emit, persist, execute, return.
 
 ## Excludes
-- How the block verifies itself — `INFO-003`.
-- The hosting boundary execution runs inside — `INFO-008`.
+- How block verifies itself — `INFO-003`.
+- Hosting boundary execution runs inside — `INFO-008`.

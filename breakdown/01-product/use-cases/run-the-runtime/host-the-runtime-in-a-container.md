@@ -10,8 +10,11 @@ status: current
 # Host the runtime in a container
 
 - The full dhc runtime runs inside Docker or Podman as the outer security and deployment boundary (`INFO-001`).
-- Agents, artifacts, and sandboxes live inside that boundary; nothing escapes to the host.
-- The operator configures the container; agents never touch the host.
+- **Inside the boundary.**
+  - Agents, artifacts, and sandboxes live inside that boundary.
+  - Nothing escapes to the host.
+- **Operator configures the container.**
+  - Agents never touch the host.
 
 ## Owns
 - The container-hosting security and deployment boundary.

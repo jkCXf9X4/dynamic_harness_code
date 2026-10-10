@@ -9,11 +9,13 @@ status: current
 
 # Schedule child completions between parent actions
 
-- When a child settles, its registered callback runs between the parent's own actions.
-- Callbacks run in completion order, not delegation order: children settle independently.
+- Child settles, its registered callback runs between the parent's own actions.
+- **Completion order, not delegation order.**
+  - Callbacks run in completion order.
+  - Children settle independently.
 
 ## Owns
-- The inter-action scheduling contract: callbacks run between the parent's own actions, in completion order.
+- Inter-action scheduling contract: callbacks run between the parent's own actions, in completion order.
 
 ## Excludes
 - The completion-callback contract this scheduling delivers — `INFO-033`.

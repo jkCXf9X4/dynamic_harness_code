@@ -9,10 +9,17 @@ status: current
 
 # Decompose a task recursively
 
-- A parent decomposes work by writing delegation code, not by calling fixed tools (`INFO-001`).
-- Each child starts with an encapsulated context: its allocated requirement, the parent's acceptance criteria, and explicitly passed inputs — nothing more (`INFO-050`).
-- A child returns a summary plus artifact IDs; the parent pulls detail on demand — `INFO-006`.
-- Delegation overhead stays near 3K tokens per child, so decomposed 3-turn workers beat a 20-turn monolith that rots past 15K.
+- Parent decomposes work by writing delegation code, not by calling fixed tools (`INFO-001`).
+- **Encapsulated child context, nothing more** (`INFO-050`).
+  - The child's allocated requirement.
+  - The parent's acceptance criteria.
+  - Explicitly passed inputs.
+- **Child output: summary plus artifact IDs** (`INFO-006`).
+  - The parent pulls detail on demand.
+- **Delegation overhead.**
+  - Stays near 3K tokens per child.
+  - Decomposed 3-turn workers beat a 20-turn monolith.
+  - The monolith rots past 15K.
 
 ## Owns
 - Recursive task decomposition via delegation code.

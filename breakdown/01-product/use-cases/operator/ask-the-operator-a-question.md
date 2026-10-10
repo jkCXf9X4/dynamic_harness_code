@@ -9,16 +9,26 @@ status: current
 
 # Ask the operator a question
 
-- Any agent, not just the root, can ask the operator a question: the question routes up the parent chain to the root and crosses to the operator (`INFO-014`).
-- The operator sees the question attributed to the asking agent; the answer routes back down the same chain to the asking agent.
-- This is the one carve-out to the operator's invisibility to inner agents — the boundary stays a single door through the root (`INFO-017`).
-- Asking is a normal channel state, not a failure: an escalation reports a failed result to the parent instead (`INFO-011`).
-- Boundary (decision AD-009): the question channel is operator tooling composed over the core directed-message primitive; the answer event is receiver-addressed (to the asking agent), so the asker sees it on its own stream regardless of the channel.
+- **Any agent can ask**
+  - Any agent, not just root, can ask operator a question.
+  - Question routes up parent chain to root, crosses to operator (`INFO-014`).
+- **Attribution and reply**
+  - Operator sees question attributed to asking agent.
+  - Answer routes back down same chain to asking agent.
+- **One carve-out**
+  - Operator invisible to inner agents, except this (`INFO-017`).
+  - Boundary stays single door through root.
+- **Asking is normal, not failure**
+  - Escalation reports failed result to parent instead (`INFO-011`).
+- **Boundary (decision `AD-009`)**
+  - Question channel: operator tooling composed over core directed-message primitive.
+  - Answer event receiver-addressed to asking agent.
+  - Asker sees it on own stream regardless of channel.
 
 ## Owns
-- The operator-question channel: any agent can ask, and the answer returns to the asking agent.
+- Operator-question channel: any agent can ask, answer returns to asking agent.
 
 ## Excludes
-- The operator-to-root request-result door this carves out of — `INFO-017`.
-- Escalation of an unreachable requirement — `INFO-011`.
+- Operator-to-root request-result door this carves out of — `INFO-017`.
+- Escalation of unreachable requirement — `INFO-011`.
 - Agent-to-agent channels and rooms — `INFO-015`, `INFO-016`.

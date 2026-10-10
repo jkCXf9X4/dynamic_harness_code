@@ -9,14 +9,20 @@ status: current
 
 # Hand off artifacts between siblings
 
-- A sibling passes its published artifact directly to another sibling as that sibling's input, without routing through the parent (`INFO-006`).
-- The sending sibling addresses the artifact by its content hash, so the handoff is safe to repeat and to verify (`INFO-006`).
-- The parent sees only the pipeline's final summary; intermediate hops stay invisible to it.
-- The receiving sibling is contained, as any agent is (`INFO-005`).
+- **Direct sibling handoff**
+  - Sibling passes published artifact directly to another sibling as input (`INFO-006`).
+  - No routing through parent.
+- **Content-hash addressing**
+  - Sending sibling addresses artifact by content hash (`INFO-006`).
+  - Handoff safe to repeat and to verify.
+- **Parent visibility**
+  - Parent sees only pipeline's final summary.
+  - Intermediate hops stay invisible to it.
+- Receiving sibling contained, as any agent is (`INFO-005`).
 
 ## Owns
 - Peer-to-peer, artifact-mediated message passing between siblings.
 
 ## Excludes
-- Parent-mediated reporting, the default route — `INFO-006`.
+- Parent-mediated reporting, default route — `INFO-006`.
 - Static fan-out, which forbids child-to-child communication — `INFO-009`.
