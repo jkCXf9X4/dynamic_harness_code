@@ -104,10 +104,18 @@ class _BoundMessenger:
 
 
 def _room(ctx: ChannelContext, name: str) -> Room:
-    """Join (creating if needed) the shared room *name*; return it."""
+    """Join (creating if needed) the shared room *name*; return a snapshot.
+
+    The returned :class:`~dhc.models.Room` is a deep copy: the shared room
+    object stays owned by the RoomManager, so membership, message history,
+    and the posting gate (``ChannelError`` for non-members, event
+    emission, sink persistence) cannot be bypassed by mutating a tool
+    return value. Reads are always fresh — join again to see newer traffic.
+    """
     if ctx.rooms is None:
         raise RuntimeError("no room manager wired into the tools layer")
-    return ctx.rooms.join(ctx.agent_id, name)
+    room = ctx.rooms.join(ctx.agent_id, name)
+    return room.model_copy(deep=True) if hasattr(room, "model_copy") else room
 
 
 def _post(ctx: ChannelContext, room_name: str, body: str) -> Message:

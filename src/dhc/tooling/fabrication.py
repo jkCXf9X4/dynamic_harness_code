@@ -88,6 +88,13 @@ class FabricationContext:
     digests as ordinary workspace data (full transparency, D2), plus the
     workspace state dict the default ``decide`` fabrication uses for its
     bookkeeping (``_turns``/``_calls`` moved into workspace state).
+
+    Framework machinery (the runtime, the engine) is stored PRIVATE: the
+    kit's closures (``decide``/``settle``/``run_block``/...) already captured
+    them at construction, and public attributes here would hand every
+    block the whole runtime — and cross-agent workspace exec — one
+    attribute away. The workspace-facing context carries only ordinary
+    workspace data.
     """
 
     def __init__(
@@ -98,8 +105,8 @@ class FabricationContext:
         state: Optional[dict] = None,
     ) -> None:
         self.agent_id = agent_id
-        self.runtime = runtime
-        self.engine = engine
+        self._runtime = runtime
+        self._engine = engine
         self.state = state if state is not None else {}
         self.guardrails = self.state.setdefault("guardrails", {})
         self.inbox = self.state.setdefault("inbox", [])
@@ -109,10 +116,15 @@ class FabricationContext:
         self.digests = self.state.setdefault("digests", {})
 
     def as_dict(self) -> dict:
-        """The dict view the default decide fabrication reads."""
+        """The dict view the default decide fabrication reads.
+
+        Pure workspace data: no agent object crosses here — the
+        machinery-side ``decide`` injects the (raw) agent itself when it
+        calls the driver, which is runtime machinery (INFO-051), not
+        workspace-visible state.
+        """
         return {
             "agent_id": self.agent_id,
-            "agent": self.runtime.get(self.agent_id) if self.runtime else None,
             "state": self.state,
             "guardrails": self.guardrails,
             "inbox": self.inbox,
@@ -136,11 +148,19 @@ def make_decide(driver: Any, agent: Any, state: dict) -> Callable[[Any], Optiona
     itself is also kept in ``state`` (``_driver``) so a namespace refresh
     between steps does not reset a scripted MockDriver's position, and so an
     agent can swap its brain by replacing ``state["_driver"]``.
+
+    The *agent* injected into the driver's context is deliberately the RAW
+    :class:`~dhc.framework.agent.Agent` (not the workspace facade): the
+    driver is runtime machinery (INFO-051) and needs the framework-side
+    surface (``record_usage``, the runtime reference for prompt-override
+    resolution). The workspace-facing ``context``/``as_dict`` view carries
+    no agent object at all.
     """
 
     def decide(ctx: Any) -> Optional[str]:
         d = ctx.as_dict() if hasattr(ctx, "as_dict") else dict(ctx)
-        d.setdefault("agent", agent)
+        # The one deliberate raw crossing: the driver seam (INFO-051).
+        d["agent"] = agent
         d.setdefault("state", state)
         state["_turns"] = state.get("_turns", 0) + 1
         state["_calls"] = state.get("_calls", 0) + 1

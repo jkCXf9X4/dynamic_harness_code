@@ -1,23 +1,44 @@
 """The in-code agent surface.
 
-This module owns :class:`Agent` — the object action blocks see as ``agent`` —
-and :class:`AgentHandle`, the lightweight task handle a parent holds for
-await/poll/cancel/status/result.
+This module owns the three faces of the agent at the framework↔REPL
+boundary:
 
-The runtime delivers this surface into each agent's REPL namespace; agent code
-never touches the runtime directly. The only collaborator is the runtime
-itself, injected by the constructor — this module imports no sibling modules
-at module level. Artifact publication is a composed namespace tool
-(``dhc.tooling``), not an agent method (decision 0014). Direct messaging is
-the one communication primitive on the agent itself: :meth:`Agent.send`
-delegates to ``Runtime.send`` (decision 0015); channel policies are tooling.
+* :class:`Agent` — the framework-side object. The pump, the settle path,
+  and the driver seam (INFO-051 — the driver is runtime machinery) use it.
+* :class:`WorkspaceAgent` — the facade action blocks see as ``agent``. The
+  runtime delivers this into each agent's REPL namespace, never the raw
+  Agent. Its public surface is the declared :data:`AGENT_SURFACE`, pinned by
+  the boundary tests (``tests/framework/test_repl_boundary.py``).
+* :class:`AgentHandle` — the lightweight task handle a parent holds for
+  await/poll/cancel/status/result. ``spawn`` returns this, never a raw
+  child; there is deliberately no ``get()`` unwrap — the raw Agent is
+  reachable only framework-side via ``Runtime.get``.
+
+The boundary is a *declared-surface* contract, not a sandbox: blocks run
+arbitrary Python and can still import modules or introspect closures. What
+the contract buys is that agent-authored code has nothing to accidentally
+rely on beyond the declared surface — no ``_runtime``, no writable
+``_status``, no shared mutable ``children`` — so the surface cannot silently
+grow and the gates (at-most-once settlement, crash containment) stay
+framework-owned.
+
+Deliberate crossings, by design and out of this contract's scope: ``bash``
+and import rights (CodeAct), ``state["_driver"]`` (the brain-swap seam),
+and the driver receiving the raw Agent (INFO-051).
+
+The only collaborator is the runtime itself, injected by the constructor —
+this module imports no sibling modules at module level. Artifact
+publication is a composed namespace tool (``dhc.tooling``), not an agent
+method (decision 0014). Direct messaging is the one communication
+primitive on the agent itself: :meth:`Agent.send` delegates to
+``Runtime.send`` (decision 0015); channel policies are tooling.
 """
 
 from __future__ import annotations
 
 import subprocess
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 from ..data.models import (
     AgentStatus,
@@ -185,17 +206,23 @@ class Agent:
         acceptance: tuple = (),
         on_done: Optional[Callable[[Any], None]] = None,
         **kwargs: Any,
-    ) -> "Agent":
+    ) -> "AgentHandle":
         """Spawn a child agent (non-blocking) and return its handle.
 
         *on_done* is registered as a completion callback on the parent's
         stream: it runs once, when the child settles — success or failure
         alike (INFO-033). Extra keyword arguments (driver, namespace, ...)
         are forwarded to the runtime.
+
+        The handle is the join surface (await/poll/cancel/status/result);
+        the raw child Agent never crosses into the parent's workspace (the
+        REPL boundary contract — see :class:`WorkspaceAgent`).
         """
         if self._runtime is None:
             raise RuntimeError("agent is not attached to a runtime")
-        child = self._runtime.spawn(
+        # Runtime.spawn already registered the child on this agent's
+        # children list (parent_id was passed) and returns the handle.
+        return self._runtime.spawn(
             requirement=requirement,
             acceptance=acceptance,
             parent_id=self.id,
@@ -203,9 +230,6 @@ class Agent:
             _agent_callback=True,
             **kwargs,
         )
-        # Runtime.spawn already registered the child on this agent's children
-        # list (parent_id was passed); do not append again.
-        return child.get()
 
     # -- directed messaging (framework primitive, 0015) ---------------------
 
@@ -288,7 +312,9 @@ class AgentHandle:
 
     Carries the child's id plus a reference to the runtime; all operations
     delegate to the runtime. The handle is *not* the agent: it exposes no
-    REPL surface and cannot mutate the child.
+    REPL surface and cannot mutate the child. There is deliberately no
+    ``get()`` unwrap — the raw :class:`Agent` is reachable only
+    framework-side via ``Runtime.get``.
     """
 
     def __init__(self, agent_id: str, runtime: Any) -> None:
@@ -318,6 +344,231 @@ class AgentHandle:
         """Return the agent's settled result."""
         return self._runtime.result(self.id)
 
-    def get(self) -> Agent:
-        """Return the underlying Agent object."""
-        return self._runtime.get(self.id)
+
+# --------------------------------------------------------------------------- #
+# The REPL-facing surface (the hard boundary)
+# --------------------------------------------------------------------------- #
+
+#: The declared public surface of :class:`WorkspaceAgent` — the only agent
+#: names agent-authored blocks may rely on. Anything else reachable on the
+#: object is out of contract and may change or vanish without notice.
+AGENT_SURFACE: frozenset[str] = frozenset(
+    {
+        # identity / lifecycle (read-only)
+        "id",
+        "requirement",
+        "acceptance",
+        "parent_id",
+        "children",
+        "done",
+        "created_ts",
+        "settled_ts",
+        # token/cost accounting (read-only, IMP-004)
+        "prompt_tokens",
+        "completion_tokens",
+        "cached_tokens",
+        "tokens",
+        "cost_usd",
+        # actions
+        "spawn",
+        "send",
+        "complete",
+        "fail",
+        "cancel",
+        # queries
+        "status",
+        "result",
+        "tool",
+        # supervision
+        "await_",
+        "poll",
+        "children_of",
+    }
+)
+
+
+@runtime_checkable
+class AgentSurface(Protocol):
+    """The declared contract of the ``agent`` object inside a workspace.
+
+    Agent-authored blocks see a :class:`WorkspaceAgent` facade; this
+    protocol is the contract that facade promises (and the boundary tests
+    pin). The raw :class:`Agent` remains framework-side: the pump, the
+    settle path, and the driver seam (INFO-051) keep using it.
+    """
+
+    id: str
+    requirement: str
+    acceptance: tuple
+    parent_id: Optional[str]
+    children: tuple
+    done: bool
+
+    def spawn(
+        self,
+        requirement: str,
+        acceptance: tuple = (),
+        on_done: Optional[Callable[[Any], None]] = None,
+        **kwargs: Any,
+    ) -> "AgentHandle": ...
+
+    def send(self, recipient_id: str, body: str) -> Any: ...
+
+    def complete(self, headline: str, artifacts: tuple = ()) -> Result: ...
+
+    def fail(self, reason: str) -> Result: ...
+
+    def cancel(self, reason: str = "cancelled") -> Result: ...
+
+    def status(self) -> Result: ...
+
+    def result(self) -> Result: ...
+
+    def tool(
+        self, callable: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> "ToolResult": ...
+
+    def await_(self, child: "AgentHandle") -> Any: ...
+
+    def poll(self, child: "AgentHandle") -> AgentStatus: ...
+
+    def children_of(self, child: "AgentHandle") -> list: ...
+
+
+class WorkspaceAgent:
+    """The ``agent`` object action blocks see — a narrow, delegating facade.
+
+    The runtime injects this into every REPL namespace (and derives every
+    namespace action callable from it) instead of the raw :class:`Agent`.
+    It forwards the declared :data:`AGENT_SURFACE` — identity, accounting
+    reads, actions, supervision — and nothing else:
+
+    * no ``_runtime`` — the whole runtime is not one attribute away;
+    * no ``_status`` / ``_result`` / ``_last_result`` — settlement state is
+      not writable from a block; the :class:`~dhc.models.CompletionLog`
+      stays the single source of truth for at-most-once (INFO-046);
+    * ``children`` is a tuple copy — a block cannot forge or drop sibling
+      ids;
+    * ``spawn`` returns an :class:`AgentHandle`, never a raw child.
+
+    This is a declared-surface boundary, not a sandbox: blocks can still
+    import modules and introspect closures, and the driver seam (INFO-051 —
+    runtime machinery) legitimately receives the raw Agent. The contract
+    is what agent-authored code may rely on — and what the boundary tests
+    pin — so the surface cannot silently grow.
+    """
+
+    __slots__ = ("_agent",)
+
+    def __init__(self, agent: "Agent") -> None:
+        self._agent = agent
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"WorkspaceAgent(id={self.id!r})"
+
+    def __dir__(self) -> list[str]:
+        """Advertise only the declared surface."""
+        return sorted(AGENT_SURFACE)
+
+    # -- identity / lifecycle (read-only views) -------------------------------
+
+    @property
+    def id(self) -> str:
+        return self._agent.id
+
+    @property
+    def requirement(self) -> str:
+        return self._agent.requirement
+
+    @property
+    def acceptance(self) -> tuple:
+        return self._agent.acceptance
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        return self._agent.parent_id
+
+    @property
+    def children(self) -> tuple:
+        """A copy of the child ids — mutation affects nothing."""
+        return tuple(self._agent.children)
+
+    @property
+    def done(self) -> bool:
+        return self._agent.done
+
+    @property
+    def created_ts(self) -> float:
+        return self._agent.created_ts
+
+    @property
+    def settled_ts(self) -> Optional[float]:
+        return self._agent.settled_ts
+
+    # -- token/cost accounting (read-only, IMP-004) ----------------------------
+
+    @property
+    def prompt_tokens(self) -> int:
+        return self._agent.prompt_tokens
+
+    @property
+    def completion_tokens(self) -> int:
+        return self._agent.completion_tokens
+
+    @property
+    def cached_tokens(self) -> int:
+        return self._agent.cached_tokens
+
+    @property
+    def tokens(self) -> int:
+        return self._agent.tokens
+
+    @property
+    def cost_usd(self) -> float:
+        return self._agent.cost_usd
+
+    # -- actions / queries / supervision: pure delegation -----------------------
+
+    def spawn(
+        self,
+        requirement: str,
+        acceptance: tuple = (),
+        on_done: Optional[Callable[[Any], None]] = None,
+        **kwargs: Any,
+    ) -> "AgentHandle":
+        """Spawn a child and return its handle (never the raw child)."""
+        return self._agent.spawn(
+            requirement, acceptance=acceptance, on_done=on_done, **kwargs
+        )
+
+    def send(self, recipient_id: str, body: str) -> Any:
+        return self._agent.send(recipient_id, body)
+
+    def complete(self, headline: str, artifacts: tuple = ()) -> Result:
+        return self._agent.complete(headline, artifacts)
+
+    def fail(self, reason: str) -> Result:
+        return self._agent.fail(reason)
+
+    def cancel(self, reason: str = "cancelled") -> Result:
+        return self._agent.cancel(reason)
+
+    def status(self) -> Result:
+        return self._agent.status()
+
+    def result(self) -> Result:
+        return self._agent.result()
+
+    def tool(
+        self, callable: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> "ToolResult":
+        return self._agent.tool(callable, *args, **kwargs)
+
+    def await_(self, child: Any) -> Any:
+        return self._agent.await_(child)
+
+    def poll(self, child: Any) -> AgentStatus:
+        return self._agent.poll(child)
+
+    def children_of(self, child: Any) -> list:
+        return self._agent.children_of(child)

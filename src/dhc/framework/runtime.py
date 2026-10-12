@@ -38,7 +38,7 @@ import traceback
 import uuid
 from typing import Any, Callable, Optional
 
-from .agent import Agent, AgentHandle, bash
+from .agent import Agent, AgentHandle, WorkspaceAgent, bash
 from ..errors import ChannelError, TurnError, TurnTimeoutError  # noqa: F401 - re-export
 from ..data.models import (
     TERMINAL_STATES,
@@ -76,6 +76,21 @@ from .caps import (  # noqa: F401 - re-export (caps defaults moved with the watc
 from .pump import _DEFAULT_STEP_TIMEOUT  # noqa: F401 - re-export
 from . import caps as _caps
 from . import integrity as _integrity
+
+
+def _crossing_snapshot(events: list) -> list:
+    """Copy events as they cross the framework→REPL boundary.
+
+    ``Event`` is a frozen model, but its ``payload`` dict is shared by
+    every holder. Handing REPL code a deep copy keeps post-emission
+    mutation a private edit: the stream's pending events, the messenger's
+    stored copies, and every other in-memory consumer keep the emitted
+    values. Duck-typed events (non-pydantic) pass through untouched.
+    """
+    return [
+        event.model_copy(deep=True) if hasattr(event, "model_copy") else event
+        for event in events
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -454,21 +469,28 @@ class Runtime:
         part of the core namespace. ``send`` is the one communication name
         here: direct messaging is the framework primitive every agent gets,
         even in a bare runtime with no tooling installed.
+
+        The boundary contract: blocks see the :class:`WorkspaceAgent`
+        facade as ``agent`` — never the raw Agent — and every action
+        callable is facade-bound, so the raw runtime is not reachable
+        through the declared surface (``__self__`` included). Pinned by
+        ``tests/framework/test_repl_boundary.py``.
         """
+        surface = WorkspaceAgent(agent)
         ns = {
-            "agent": agent,
-            "spawn": agent.spawn,
-            "send": agent.send,
-            "complete": agent.complete,
-            "fail": agent.fail,
-            "cancel": agent.cancel,
-            "status": agent.status,
-            "result": agent.result,
-            "tool": agent.tool,
+            "agent": surface,
+            "spawn": surface.spawn,
+            "send": surface.send,
+            "complete": surface.complete,
+            "fail": surface.fail,
+            "cancel": surface.cancel,
+            "status": surface.status,
+            "result": surface.result,
+            "tool": surface.tool,
             "bash": bash,
-            "await_": agent.await_,
-            "poll": agent.poll,
-            "children_of": agent.children_of,
+            "await_": surface.await_,
+            "poll": surface.poll,
+            "children_of": surface.children_of,
             "Await": Await,
             "Poll": Poll,
             "Sleep": Sleep,
@@ -537,11 +559,17 @@ class Runtime:
         summary: str = "",
         reason: str = "",
     ) -> None:
-        """Settle *agent_id* at most once; dispatch its completion to the parent."""
+        """Settle *agent_id* at most once; dispatch its completion to the parent.
+
+        The :class:`~dhc.models.CompletionLog` is the single source of
+        truth for at-most-once (INFO-046): settlement is gated by the log
+        FIRST, so a forged ``agent._status`` (reachable only by reaching
+        around the declared surface) can never suppress or duplicate the
+        real completion — the log's first entry wins, later attempts are
+        rejected.
+        """
         with self._lock:
             agent = self._agents[agent_id]
-            if is_terminal(agent._status):
-                return  # already settled; at-most-once
             completion = Completion(
                 agent_id=agent_id,
                 status=status,
@@ -552,7 +580,7 @@ class Runtime:
             try:
                 self._completion_log.settle(completion)
             except ChannelError:
-                return  # at-most-once: first settlement wins
+                return  # at-most-once: the log's first entry wins
             self._completions[agent_id] = completion
             parent_id = agent.parent_id
             host_callbacks = list(self._host_callbacks.get(agent_id, []))
@@ -707,14 +735,16 @@ class Runtime:
         consume-once semantics (a second call returns only events published
         since the first) without stealing events from the other consumers
         of the fan-out seam (the caps watchdog, the driver's recent
-        context, the StateWriter poll thread).
+        context, the StateWriter poll thread). Returned events are
+        boundary snapshots (deep copies) — payload mutation stays private
+        to the reader.
         """
         topic = f"events:{agent_id}"
         peek = getattr(self.event_bus, "peek", None)
         if peek is None:
             # A bus without the fan-out seam: fall back to the destructive
             # drain (the pre-fix contract).
-            return list(self.event_bus.drain(topic))
+            return _crossing_snapshot(list(self.event_bus.drain(topic)))
         events = peek(topic)
         with self._lock:
             cursor = self._event_cursors.get(agent_id, 0)
@@ -724,7 +754,7 @@ class Runtime:
                 cursor = 0
             fresh = events[cursor:]
             self._event_cursors[agent_id] = len(events)
-        return list(fresh)
+        return _crossing_snapshot(list(fresh))
 
     def tool_events(self, agent_id: str) -> list:
         """The agent-facing settled-event stream (G-04), consume-once.
@@ -738,14 +768,15 @@ class Runtime:
         or from the caps watchdog (``_caps_cursors``). The discipline
         guarantees (FIFO, at-most-once, persist-before-execute) remain
         runtime-owned: this only advances a read cursor over the already
-        persisted, ordered stream.
+        persisted, ordered stream. Returned events are boundary snapshots
+        (deep copies) — payload mutation stays private to the reader.
         """
         topic = f"events:{agent_id}"
         peek = getattr(self.event_bus, "peek", None)
         if peek is None:
             # A bus without the fan-out seam: fall back to the destructive
             # drain (the pre-fix contract), same as :meth:`events`.
-            return list(self.event_bus.drain(topic))
+            return _crossing_snapshot(list(self.event_bus.drain(topic)))
         events = peek(topic)
         with self._lock:
             cursor = self._tool_event_cursors.get(agent_id, 0)
@@ -755,7 +786,7 @@ class Runtime:
                 cursor = 0
             fresh = events[cursor:]
             self._tool_event_cursors[agent_id] = len(events)
-        return list(fresh)
+        return _crossing_snapshot(list(fresh))
 
     def completion_log(self) -> CompletionLog:
         """Return the at-most-once settlement registry."""

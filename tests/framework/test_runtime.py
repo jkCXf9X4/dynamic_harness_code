@@ -149,10 +149,10 @@ def test_agent_spawn_delegates_to_runtime():
     rt = make_runtime()
     parent = rt.get(rt.spawn("parent", driver=ScriptedDriver()).id)
     child = parent.spawn("child task")
-    assert isinstance(child, Agent)
+    assert isinstance(child, AgentHandle)
     assert child.id in parent.children
-    assert child.parent_id == parent.id
-    assert rt.get(child.id) is child
+    assert rt.get(child.id).parent_id == parent.id
+    assert rt.get(child.id).id == child.id
     rt.stop()
 
 
@@ -160,7 +160,9 @@ def test_agent_handle_surface():
     rt = make_runtime()
     handle = rt.spawn("task", driver=ScriptedDriver("complete('done')"))
     assert isinstance(handle, AgentHandle)
-    assert handle.id == handle.get().id
+    assert handle.id == rt.get(handle.id).id
+    # No unwrap: the raw Agent is reachable only framework-side.
+    assert not hasattr(handle, "get")
     completion = handle.await_()
     assert completion.status == AgentStatus.completed
     assert handle.poll() == AgentStatus.completed

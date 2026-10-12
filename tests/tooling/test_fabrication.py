@@ -399,7 +399,9 @@ def test_context_carries_guardrails_inbox_outbox_budgets_digests(tmp_path):
         assert ctx.digests == {}
         d = ctx.as_dict()
         assert d["agent_id"] == agent.id
-        assert d["agent"] is agent
+        # The workspace-facing view carries no agent object (the driver
+        # seam injects the raw agent itself — INFO-051 machinery).
+        assert "agent" not in d
     finally:
         rt.stop()
 
