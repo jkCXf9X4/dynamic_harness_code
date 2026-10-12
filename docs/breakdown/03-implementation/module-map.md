@@ -26,7 +26,7 @@ status: current
   - Moved callables are re-exported here.
 - **`framework/repl.py`**: per-agent persistent `ReplEngine` (`INFO-050`).
 - **`framework/event_stream.py`**: `EventStream`, `EventBus`, `CompletionDispatcher` (`INFO-046`, `INFO-047`, `INFO-048`).
-- **`framework/agent.py`**: the in-code surface: `Agent`, `AgentHandle`, `bash`, `send` (the directed-message primitive, `AD-009`).
+- **`framework/agent.py`**: the in-code surface: `Agent`, `AgentHandle`, `WorkspaceAgent`/`AgentSurface` (the REPL boundary, `INFO-072`), `bash`, `send` (the directed-message primitive, `AD-009`).
 
 - **`framework/pump.py`**: the pump.
   - Drives agent-authored `__runner__` loops under the hard gates.
