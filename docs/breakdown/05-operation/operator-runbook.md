@@ -60,7 +60,6 @@ Where run output lands and how to read it. Defaults below; `DHC_WORKSPACE_ROOT` 
 
 - `/resume <agent_id>` prints the agent's persisted checkpoint (`INFO-070`).
 - Checkpoints load from `CheckpointStore` (`src/dhc/ui/checkpoint.py`): one `<agent_id>.json` per agent.
-- `build_runtime` attaches no `runtime.checkpoint_store`, so `/resume` finds nothing until an operator attaches one.
 - Checkpoint model: `INFO-063`.
 
 ## Owns

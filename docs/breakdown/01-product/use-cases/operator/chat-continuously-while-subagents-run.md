@@ -2,7 +2,7 @@
 id: INFO-022
 type: info
 title: Chat continuously while subagents run
-summary: Operator messages keep flowing while subagents run, and a message sent mid-turn steers the root's current turn immediately
+summary: Operator messages keep flowing while subagents run; the chat loop is synchronous, so !steer is delivered between requirements via runtime.send
 date: 2026-10-05
 status: current
 ---
@@ -13,8 +13,9 @@ status: current
   - Operator's chat with root stays live while hierarchy below runs.
   - Running subagents never block message delivery (`INFO-017`, `INFO-014`).
 - **Mid-turn steering**
-  - Message sent while root mid-turn steers immediately.
-  - Reaches current turn, can redirect running work.
+  - The chat loop is synchronous: `operator.run` blocks to settlement, so the human types `!steer` only between requirements.
+  - `!steer` is delivered via `runtime.send` (framework primitive, decision 0015) to the named agent's event stream; it prints "steered <id>".
+  - The target is a settled agent, so the message does not redirect a running turn on the chat path.
 - **Streaming responses**
   - Root's responses stream back continuously, not only final result.
   - Pulled on demand through artifact tiers (`INFO-006`).

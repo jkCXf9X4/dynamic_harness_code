@@ -5,7 +5,8 @@ framework primitive (``Agent.send`` / ``Runtime.send``); every channel is
 tooling composed ON TOP of it — a routing or read-state policy the agent
 can use, replace, or ignore, keeping full control of its communication.
 This module installs the channel tools (``room``, ``messenger``,
-``escalate``, ``ask_operator``, ``post``, ``channel_read``) with the same
+``escalate``, ``ask_operator``, ``post``, ``room_messages``,
+``channel_read``) with the same
 namespace-wrapping mechanics as :func:`dhc.tooling.register_artifact_tools`;
 the composition root (``wiring.build_runtime``) is the caller.
 
@@ -16,6 +17,7 @@ framework primitive (``Runtime.send``); the read methods surface the shared
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -103,8 +105,8 @@ class _BoundMessenger:
         return self._view.unread_count(self._agent_id)
 
 
-def _room(ctx: ChannelContext, name: str) -> Room:
-    """Join (creating if needed) the shared room *name*; return a snapshot.
+def _room(ctx: ChannelContext, room_name: str) -> Room:
+    """Join (creating if needed) the shared room *room_name*; return a snapshot.
 
     The returned :class:`~dhc.models.Room` is a deep copy: the shared room
     object stays owned by the RoomManager, so membership, message history,
@@ -114,7 +116,7 @@ def _room(ctx: ChannelContext, name: str) -> Room:
     """
     if ctx.rooms is None:
         raise RuntimeError("no room manager wired into the tools layer")
-    room = ctx.rooms.join(ctx.agent_id, name)
+    room = ctx.rooms.join(ctx.agent_id, room_name)
     return room.model_copy(deep=True) if hasattr(room, "model_copy") else room
 
 
@@ -125,11 +127,38 @@ def _post(ctx: ChannelContext, room_name: str, body: str) -> Message:
     return ctx.rooms.post(ctx.agent_id, room_name, body)
 
 
-def _channel_read(ctx: ChannelContext, topic: str) -> list[Message]:
-    """Return the room's traffic in post order (empty for unknown rooms)."""
+def _room_messages(ctx: ChannelContext, room_name: str) -> list[Message]:
+    """Return the room's traffic in post order WITHOUT joining (W3.7).
+
+    A pure read: no membership side effect, no room creation. Raises
+    ``ChannelError`` naming the room when the room is unknown (W3.10).
+    """
     if ctx.rooms is None:
         raise RuntimeError("no room manager wired into the tools layer")
-    return ctx.rooms.messages(topic)
+    return ctx.rooms.messages(room_name)
+
+
+def _channel_read(
+    ctx: ChannelContext, room_name: str | None = None, topic: str | None = None
+) -> list[Message]:
+    """Return the room's traffic in post order (advanced, W3.7).
+
+    Deprecated alias of :func:`room_messages` — kept for compatibility.
+    ``topic`` is a deprecated keyword alias for ``room_name`` (W3.4);
+    passing it emits a ``DeprecationWarning``.
+    """
+    if topic is not None:
+        warnings.warn(
+            "channel_read(topic=...) is deprecated; use room_name=",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        room_name = topic
+    if room_name is None:
+        raise TypeError("channel_read() missing required argument: 'room_name'")
+    if ctx.rooms is None:
+        raise RuntimeError("no room manager wired into the tools layer")
+    return ctx.rooms.messages(room_name)
 
 
 def _escalate(ctx: ChannelContext, requirement: str, reason: str) -> Event:
@@ -147,11 +176,18 @@ def _escalate(ctx: ChannelContext, requirement: str, reason: str) -> Event:
     )
 
 
-def _ask_operator(ctx: ChannelContext, question: str) -> Event:
-    """Ask the operator *question* as the calling agent."""
+def _ask_operator(ctx: ChannelContext, question: str) -> str:
+    """Ask the operator *question*; return the question id (W3.6).
+
+    The returned id is the question event's ``payload["event_id"]`` — the
+    handle the asker polls with ``answers(question_id)`` until the
+    operator's answer text arrives, instead of excavating the consume-once
+    ``events()`` cursor for the payload.
+    """
     if ctx.questions is None:
         raise RuntimeError("no operator-question channel wired into the tools layer")
-    return ctx.questions.ask(ctx.agent_id, question)
+    event = ctx.questions.ask(ctx.agent_id, question)
+    return str(event.payload["event_id"])
 
 
 # --------------------------------------------------------------------------- #
@@ -167,6 +203,7 @@ _CHANNEL_TOOL_NAMES: frozenset[str] = frozenset(
         "ask_operator",
         "post",
         "channel_read",
+        "room_messages",
     }
 )
 
@@ -184,16 +221,87 @@ def _bind(ctx: ChannelContext) -> dict[str, Callable[..., Any]]:
         bound["messenger"] = _BoundMessenger(ctx.runtime, ctx.messenger, ctx.agent_id)
     bound.update(
         {
-            "room": lambda name: _room(ctx, name),
+            "room": lambda room_name: _room(ctx, room_name),
             "escalate": lambda requirement, reason: _escalate(
                 ctx, requirement, reason
             ),
             "ask_operator": lambda question: _ask_operator(ctx, question),
             "post": lambda room_name, body: _post(ctx, room_name, body),
-            "channel_read": lambda topic: _channel_read(ctx, topic),
+            "room_messages": lambda room_name: _room_messages(ctx, room_name),
+            "channel_read": lambda room_name=None, topic=None: _channel_read(
+                ctx, room_name, topic
+            ),
         }
     )
     return bound
+
+
+def _register_surface_entries() -> None:
+    """Register the channel-tool surface entries (idempotent, W1.2)."""
+    from ..framework.surface import SurfaceEntry, default_registry
+
+    default_registry.register(
+        SurfaceEntry(
+            name="room",
+            fn=_room,
+            doc="Join (creating if needed) a shared room; return a snapshot.",
+            tier="core",
+            call="room(room_name)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="messenger",
+            fn=None,
+            doc="Per-agent facade: send + inbox/read-state sugar.",
+            tier="core",
+            call="messenger.send(recipient_id, body)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="escalate",
+            fn=_escalate,
+            doc="Escalate to the parent: requirement + reason (two args).",
+            tier="core",
+            call="escalate(requirement, reason)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="ask_operator",
+            fn=_ask_operator,
+            doc="Ask the human operator a question; returns the question id.",
+            tier="core",
+            call="ask_operator(question)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="post",
+            fn=_post,
+            doc="Post a message to a room.",
+            tier="core",
+            call="post(room_name, body)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="room_messages",
+            fn=_room_messages,
+            doc="Read a room's traffic in post order without joining.",
+            tier="core",
+            call="room_messages(room_name)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="channel_read",
+            fn=_channel_read,
+            doc="Deprecated alias of room_messages (advanced).",
+            tier="advanced",
+        )
+    )
 
 
 def register_channel_tools(
@@ -203,11 +311,12 @@ def register_channel_tools(
 ) -> None:
     """Install the channel tools as namespace callables on *runtime*.
 
-    Same mechanics as ``dhc.tooling.framework_tools.register_default_tools``: the
-    runtime's namespace builder (``_build_namespace``) is wrapped so each
-    agent's turn namespace gains the channel tools bound to that agent. The
-    framework core is untouched: it keeps its slim base namespace (with the
-    ``send`` primitive); the channel policies are composed in here.
+    Same mechanics as ``dhc.tooling.framework_tools.register_default_tools``: W1.3
+    appends a builder to the runtime's ordered, public namespace-builder
+    chain (``runtime.register_namespace_builder``) so each agent's turn
+    namespace gains the channel tools bound to that agent. The framework
+    core is untouched: it keeps its slim base namespace; the channel
+    tools are composed in here.
 
     *bus* is duck-typed (``publish(event)``); *channels* maps names to
     channel objects (``messenger`` — the shared inbox view, ``rooms``,
@@ -216,13 +325,13 @@ def register_channel_tools(
     resolves per agent at namespace-build time.
     """
     channels = dict(channels or {})
-    original = getattr(runtime, "_build_namespace", None)
     names = set(getattr(runtime, "_installed_tool_names", ()))
     names.update(_CHANNEL_TOOL_NAMES)
     runtime._installed_tool_names = names
 
+    _register_surface_entries()
+
     def build(agent: Any) -> dict:
-        ns = original(agent) if original is not None else {}
         resolved: dict[str, Any] = {}
         for name, channel in channels.items():
             resolved[name] = channel(agent.id) if callable(channel) else channel
@@ -232,13 +341,16 @@ def register_channel_tools(
             bus=bus,
             channels=resolved,
         )
-        ns.update(_bind(ctx))
-        return ns
+        return _bind(ctx)
 
-    runtime._build_namespace = build  # type: ignore[method-assign]
+    runtime.register_namespace_builder(build, name="channel_tools")
 
 
 __all__ = [
     "ChannelContext",
     "register_channel_tools",
 ]
+
+# The channel-tool surface entries are registered at import time (W1.2):
+# the registry must be complete before any runtime is wired.
+_register_surface_entries()

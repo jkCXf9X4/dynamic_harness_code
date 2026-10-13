@@ -22,7 +22,10 @@
     "max_iterations": 400,
     "max_agent_tokens": null,
     "max_agents": 300,
-    "max_depth": 15
+    "max_depth": 15,
+    "max_workspace_bytes": null,
+    "max_children": null,
+    "max_messages_per_step": null
   },
   "agent": {
     "environment_notes": [],

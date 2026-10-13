@@ -41,6 +41,13 @@ Decide gets its answer through a swappable driver. The seam spans kit factory, p
 - The state slot survives the per-turn namespace refresh; the workspace name does not.
 - An override is called as `build_prompt(agent, driver)` and must return the prompt string.
 - `default_build_prompt` ships as kit citizen `build_prompt` — replacing it changes the LLM's prompt.
+- The prompt's tool/API section is GENERATED from the surface registry (`framework/surface.py`: `SurfaceEntry`/`SurfaceRegistry`/`default_registry`) via `registry.prompt_section()` — the single source of truth, so the prompt cannot drift from the wired namespace.
+- The registry holds 47 entries: 29 core, 3 advanced, 15 internal.
+- Core tier (prompt-visible) includes `read_artifact`, `list_artifacts`, `post`, `room_messages`, `ack`, `answers`, `gather`, `Await`/`Poll`/`Sleep`.
+- `channel_read` is advanced tier — a deprecated alias of `room_messages` (reachable, not advertised).
+- The doctrine (lifecycle, mission, guard rails) lives in `llm/agent_system_prompt.txt`; the API section is not in it.
+- The old hand-written API literal in the driver was deleted (W1.4); the generated section replaces it.
+- `tests/llm/test_prompt_conformance.py` guards prompt↔API drift in both directions (every prompt claim resolves in the namespace with matching arity; every core entry appears in the prompt).
 - Recent context: last 5 events via `runtime.events(agent.id)`, payload JSON capped at 200 chars.
 - `llm/prompts.py` structured composition is superseded and unwired (`INFO-066`).
 

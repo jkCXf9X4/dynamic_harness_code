@@ -1,16 +1,21 @@
 """Runtime configuration for dhc.
 
-Two layers:
+One canonical config, one env bridge (W5.1):
 
-* A plain dataclass :class:`Settings` (pydantic-settings is not a
-  dependency). Values are read from the environment and an optional ``.env``
-  file (via python-dotenv), then frozen into a process-wide singleton by
-  :func:`get_settings`.
-* A Pydantic-validated JSON config file (``harness.json``) with layered
-  discovery: XDG user-global (``~/.config/dynamic-harness/harness.json``) →
-  working-directory ``./harness.json`` → explicit ``--config PATH``. Layers
-  are deep-merged (lowest → highest precedence) and unknown keys are ignored.
-  The API key is env-only — never stored in the JSON file.
+* :class:`HarnessConfig` (Pydantic-validated ``harness.json``) is THE
+  canonical config. Layered discovery: XDG user-global
+  (``~/.config/dynamic-harness/harness.json``) → working-directory
+  ``./harness.json`` → explicit ``--config PATH``. Layers are deep-merged
+  (lowest → highest precedence) and unknown keys are ignored. The API key is
+  env-only — never stored in the JSON file.
+* :class:`Settings` is a typed compatibility **view** over a
+  :class:`HarnessConfig` (constructed from one), not a parallel source. The
+  legacy field names (``openai_model``, ``llm_timeout_seconds``,
+  ``provider``) are read-only properties over the config.
+* The DHC_* env vars are bridged in ONE place (:func:`_apply_env_bridge`,
+  called from :func:`load_settings`): ``DHC_OPENAI_MODEL`` /
+  ``DHC_LLM_TIMEOUT_SECONDS`` override the ``llm`` section; the API key is
+  read by :func:`merge_api_key`. No other module reads config env vars.
 """
 
 from __future__ import annotations
@@ -221,49 +226,83 @@ def merge_api_key(config: HarnessConfig | None = None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Legacy Settings dataclass (backward compatible)
+# Settings — typed compatibility view over HarnessConfig (W5.1)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class Settings:
-    """Resolved dhc settings."""
+    """Resolved dhc settings — a typed compatibility view over HarnessConfig.
+
+    The canonical config is :class:`HarnessConfig` (from ``harness.json`` +
+    the DHC_* env bridge applied by :func:`load_settings`). This view exposes
+    the legacy field names (``openai_model``, ``llm_timeout_seconds``,
+    ``provider``) as read-only properties over the config, so existing
+    callers keep working while the single source of truth is the
+    HarnessConfig (W5.1).
+    """
 
     workspace_root: Path
     artifact_root: Path
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o"
-    llm_timeout_seconds: float = 60.0
     max_turn_seconds: float = 120.0
     log_level: str = "INFO"
     config: HarnessConfig = field(default_factory=HarnessConfig)
 
     @property
-    def provider(self) -> LLMProviderConfig:
-        """Provider view: ``config.llm`` overridden by DHC_OPENAI_MODEL / DHC_LLM_TIMEOUT_SECONDS.
+    def openai_model(self) -> str:
+        """The LLM model (view over ``config.llm.model``)."""
+        return self.config.llm.model
 
-        Precedence: explicit CLI args (caller-supplied) → config file → env vars
-        → defaults. The env overrides here mirror the legacy ``DHC_*`` knobs so
-        existing deployments keep working while the canonical source is the
-        ``llm`` section of ``harness.json``.
+    @property
+    def llm_timeout_seconds(self) -> float:
+        """The LLM call timeout (view over ``config.llm.call_timeout_seconds``)."""
+        return self.config.llm.call_timeout_seconds
+
+    @property
+    def provider(self) -> LLMProviderConfig:
+        """The provider view (``config.llm``, with the DHC_* env bridge applied).
+
+        Pure view over the canonical config — no env reading here. The DHC_*
+        env overrides are applied once, in :func:`load_settings`, via
+        :func:`_apply_env_bridge` (W5.1).
         """
-        updates: dict = {}
-        model = os.environ.get("DHC_OPENAI_MODEL")
-        if model:
-            updates["model"] = model
-        timeout = os.environ.get("DHC_LLM_TIMEOUT_SECONDS")
-        if timeout:
-            try:
-                updates["call_timeout_seconds"] = float(timeout)
-            except ValueError as exc:
-                raise ConfigError(
-                    f"DHC_LLM_TIMEOUT_SECONDS must be a number, got {timeout!r}"
-                ) from exc
-        return self.config.llm.model_copy(update=updates)
+        return self.config.llm
+
+
+def _apply_env_bridge(config: HarnessConfig, env: Mapping[str, str]) -> HarnessConfig:
+    """Apply the DHC_* env overrides to the config (single env bridge, W5.1).
+
+    This is the ONE place that reads ``DHC_OPENAI_MODEL`` /
+    ``DHC_LLM_TIMEOUT_SECONDS`` and applies them to the canonical
+    HarnessConfig. Precedence: env vars > config file > defaults. The API
+    key is env-only (never in the JSON config) and is read by
+    :func:`merge_api_key`, not here.
+    """
+    updates: dict = {}
+    model = env.get("DHC_OPENAI_MODEL")
+    if model:
+        updates["model"] = model
+    timeout = env.get("DHC_LLM_TIMEOUT_SECONDS")
+    if timeout:
+        try:
+            updates["call_timeout_seconds"] = float(timeout)
+        except ValueError as exc:
+            raise ConfigError(
+                f"DHC_LLM_TIMEOUT_SECONDS must be a number, got {timeout!r}"
+            ) from exc
+    if updates:
+        config = config.model_copy(update={"llm": config.llm.model_copy(update=updates)})
+    return config
 
 
 def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
-    """Build a :class:`Settings` from *env* (default: os.environ + .env)."""
+    """Build a :class:`Settings` view from *env* (default: os.environ + .env).
+
+    Loads the canonical :class:`HarnessConfig` (layered harness.json), applies
+    the DHC_* env bridge once (:func:`_apply_env_bridge`), and wraps the
+    result in the :class:`Settings` view.
+    """
     if env is None:
         load_dotenv()
         env = os.environ
@@ -282,15 +321,18 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
         except ValueError as exc:
             raise ConfigError(f"{name} must be a number, got {raw!r}") from exc
 
+    # The DHC_* env bridge is applied ONCE here (W5.1): the canonical
+    # HarnessConfig is loaded from the layered harness.json files, then the
+    # DHC_OPENAI_MODEL / DHC_LLM_TIMEOUT_SECONDS env overrides are applied on
+    # top. The Settings view then exposes the legacy field names over it.
+    config = _apply_env_bridge(load_config(), env)
     return Settings(
         workspace_root=workspace_root,
         artifact_root=artifact_root,
         openai_api_key=env.get("OPENAI_API_KEY", ""),
-        openai_model=env.get("DHC_OPENAI_MODEL", "gpt-4o"),
-        llm_timeout_seconds=_float("DHC_LLM_TIMEOUT_SECONDS", 60.0),
         max_turn_seconds=_float("DHC_MAX_TURN_SECONDS", 120.0),
         log_level=env.get("DHC_LOG_LEVEL", "INFO"),
-        config=load_config(),
+        config=config,
     )
 
 
@@ -298,7 +340,7 @@ _settings: Optional[Settings] = None
 
 
 def get_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
-    """Return the process-wide :class:`Settings` singleton (loaded once)."""
+    """Return the process-wide :class:`Settings` view singleton (loaded once)."""
     global _settings
     if _settings is None:
         _settings = load_settings(env)

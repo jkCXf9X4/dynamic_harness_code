@@ -82,7 +82,7 @@ def test_default_runner_publish_and_complete(tmp_path):
         assert agent._last_result is not None
         assert agent._last_result.ok is True
         assert agent._last_result.value == "done"
-        assert rt.artifact_store_real.list_ids(), "publish must persist an artifact"
+        assert rt.artifact_store.list_ids(), "publish must persist an artifact"
 
         # Turn 2: decide returns None -> settle; runner finishes.
         o2 = engine.advance(agent.id)

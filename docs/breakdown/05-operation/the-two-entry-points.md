@@ -17,16 +17,17 @@ Two CLI surfaces ship. The `dhc` console script runs a bare runtime; the operato
 - Constructs bare `Runtime(settings=settings)` directly; never calls `build_runtime`.
 - Bare form runs the legacy loop: no caps watchdog, no rot gate (`INFO-055`, `IMD-004`).
 - Adds `Operator` plus `ChatSession` (`src/dhc/ui/operator.py`); all chat semantics live there.
-- Prints one banner: rich rule when available, plain text fallback.
-- Flags: `--context`, `--transcript`, `--mock`, `--model`, `--inspect`.
+- Prints one banner: a rich rule plus the `ChatSession.COMMANDS` list (plain text fallback when rich is unavailable).
+- Flags: `--context`, `--transcript`, `--mock`, `--config`, `--inspect`.
 - Persists `.dhc/context.md` plus `.dhc/transcript.md` under the workspace root (`INFO-028`).
   - Every input line appends to both files, then runs as one requirement.
 - `--inspect AGENT_ID` prints a read-only view: status, result, caps, workspace keys; exits 0.
-- In-loop commands: `!quit` exits, `!steer <agent_id> <msg>` steers, `!inspect <agent_id>` inspects.
+- In-loop commands: `!quit` exits, `!steer <agent_id> <msg>` steers, `!inspect <agent_id>` inspects, anything else is a new requirement.
 - EOF exits the loop.
 - `ChatSession` receives driver `None`; `Operator.run` falls back to `DefaultDriver`.
 - `DefaultDriver` settles each requirement with one coded `complete(requirement)` action.
-- `--mock`, `--model`, and key presence select the banner text only.
+- `--mock` is accepted for quickstart parity but is a documented no-op: chat always runs the deterministic driver.
+- `--model` was removed (W6.4); the real driver's model is configured via `llm.model` in `harness.json` (or `--model` on the terminal).
 - The chat command never calls an LLM.
 
 ## The operator terminal
@@ -36,15 +37,17 @@ Two CLI surfaces ship. The `dhc` console script runs a bare runtime; the operato
 - Constructs the wired runtime: `build_runtime(settings, mock, artifact_root=settings.artifact_root)`.
 - Attaches `StateWriter` at the artifact root's parent and subscribes it to the bus.
 - Prefers the wired `runtime.operator`, so `ask_operator` questions reach the human (`INFO-023`).
-- Flags: `--requirement`, `--batch`, `--mock`, `--config`, `--model`, `--base-url`, `--api-key`.
+- Flags: `--requirement`, `--batch`, `--mock`, `--config`, `--model`, `--base-url`, `--api-key`, `--inspect`.
 - `--requirement TEXT` or `--batch` runs batch mode once: outcome, aggregate, state-file paths; returns 0.
 - Interactive mode keeps one root agent across turns.
 - No continuation hook exists, so each requirement spawns a fresh root agent.
-- Slash commands: `/tree`, `/agents`, `/artifacts [id]`, `/events`, `/stats`, `/resume <agent_id>`, `/compact`, `/help`, `/quit`.
+- Slash commands: `/tree`, `/agents`, `/artifacts [id]`, `/events`, `/stats`, `/resume <agent_id>`, `/compact`, `/help`, `/quit` (`/q` and `/exit` are aliases; plain `exit`/`quit` also work).
 - Ctrl+C cancels the running agent and returns to the prompt.
 - EOF exits.
 - `--config PATH` loads an explicit `harness.json` as the highest-precedence layer.
 - `--model`, `--base-url`, `--api-key` override the provider config on the settings.
+- `--inspect AGENT_ID` prints a read-only view and exits (parity with the chat CLI).
+- `ask_operator` (in-block tool) returns a question id (qid); the agent polls `answers(qid)` for the reply (`INFO-023`).
 
 ## Owns
 - The two CLI surfaces: what each is, what each constructs, what each offers.

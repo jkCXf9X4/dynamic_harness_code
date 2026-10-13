@@ -314,6 +314,38 @@ def test_message_defaults():
     assert isinstance(m.ts, datetime)
 
 
+def test_message_has_stable_id():
+    """W3.3: Message.id exists (uuid hex) so messenger.read works from
+    the inbox's own output; ids are unique per message."""
+    m1 = Message(sender_id="a", recipient_id="b", body="hi")
+    m2 = Message(sender_id="a", recipient_id="b", body="hi")
+    assert isinstance(m1.id, str) and m1.id
+    assert m1.id != m2.id
+
+
+def test_result_artifacts_accept_artifact_objects_or_ids():
+    """W3.1: complete(..., artifacts=...) accepts Artifact objects or id
+    strings, coerced via the single _artifact_ids helper."""
+    art = Artifact(headline="h", summary="s", report="r")
+    r = Result(done=True, ok=True, value="x", artifacts=[art, "sha256:abc"])
+    assert r.artifacts == [art.id, "sha256:abc"]
+    # A single object/string is accepted too (widening).
+    assert Result(done=True, ok=True, artifacts=art).artifacts == [art.id]
+    assert Result(done=True, ok=True, artifacts="sha256:x").artifacts == ["sha256:x"]
+    # Plain ids keep working (additive-first).
+    assert Result(done=True, ok=True, artifacts=["sha256:x"]).artifacts == ["sha256:x"]
+
+
+def test_result_artifacts_reject_other_types():
+    """W3.1: anything else is a TypeError naming the accepted types."""
+    with pytest.raises(TypeError) as exc:
+        Result(done=True, ok=True, artifacts=[123])
+    assert "Artifact objects or artifact id strings" in str(exc.value)
+    with pytest.raises(TypeError) as exc2:
+        Result(done=True, ok=True, artifacts=42)
+    assert "Artifact objects or artifact id strings" in str(exc2.value)
+
+
 def test_room_defaults():
     r = Room(name="war-room")
     assert r.member_ids == []

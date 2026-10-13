@@ -195,15 +195,43 @@ class FakeMessenger:
 def test_steer_with_messenger_delivers():
     messenger = FakeMessenger()
     op = Operator(runtime=None, messenger=messenger)
-    op.steer("a1", "change course")
+    delivered = op.steer("a1", "change course")
+    assert delivered is True
     assert messenger.sent == [("operator", "a1", "change course")]
     assert op.undelivered_steers == []
 
 
 def test_steer_without_messenger_records_noop():
     op = Operator(runtime=None)
-    op.steer("a1", "hello")
+    delivered = op.steer("a1", "hello")
+    assert delivered is False
     assert op.undelivered_steers == [("a1", "hello")]
+
+
+def test_steer_via_runtime_send_delivers():
+    """W6.2 delivered path: a runtime with a working send() delivers."""
+    rt = make_runtime()
+    try:
+        rt.spawn("a task", driver=DefaultDriver())
+        op = Operator(runtime=rt)
+        delivered = op.steer("a1", "go left")
+        assert delivered is True
+        assert op.undelivered_steers == []
+    finally:
+        rt.stop()
+
+
+def test_steer_via_runtime_send_unknown_recipient_undelivered():
+    """W6.2: runtime.send raises for an unknown recipient, so the steer
+    falls back to the undelivered record (honesty, not a crash)."""
+    rt = make_runtime()
+    try:
+        op = Operator(runtime=rt)
+        delivered = op.steer("nope", "go left")
+        assert delivered is False
+        assert op.undelivered_steers == [("nope", "go left")]
+    finally:
+        rt.stop()
 
 
 # --------------------------------------------------------------------------- #
@@ -235,7 +263,9 @@ def test_chat_session_normal_line_runs_requirement():
         rt.stop()
 
 
-def test_chat_session_steer_calls_operator():
+def test_chat_session_steer_undelivered_is_loud():
+    """W6.2: with no messenger wired (the chat path), an undelivered steer
+    must NOT print the success-looking 'steered <id>' — it names the no-op."""
     rt = make_runtime()
     try:
         op = Operator(runtime=rt)
@@ -243,9 +273,77 @@ def test_chat_session_steer_calls_operator():
         session = ChatSession(op, scripted_input("!steer a1 go left", "!quit"), stream)
         session.start()
         assert op.undelivered_steers == [("a1", "go left")]
-        assert "steered a1" in stream.text
+        assert "steer NOT delivered to a1 (no messenger wired)" in stream.text
+        assert "steered a1" not in stream.text
     finally:
         rt.stop()
+
+
+def test_chat_session_steer_delivered_prints_success():
+    """W6.2 delivered path: a messenger wired on the operator delivers, and
+    the success message stays honest ('steered <id>')."""
+    rt = make_runtime()
+    try:
+        messenger = FakeMessenger()
+        op = Operator(runtime=rt, messenger=messenger)
+        stream = FakeStream()
+        session = ChatSession(op, scripted_input("!steer a1 go left", "!quit"), stream)
+        session.start()
+        assert messenger.sent == [("operator", "a1", "go left")]
+        assert op.undelivered_steers == []
+        assert "steered a1" in stream.text
+        assert "NOT delivered" not in stream.text
+    finally:
+        rt.stop()
+
+
+def test_chat_session_inspect_unknown_id_is_named():
+    """W6.3: !inspect on an unknown agent id names it loudly instead of
+    printing a blank 'status: None' view."""
+    rt = make_runtime()
+    try:
+        op = Operator(runtime=rt)
+        stream = FakeStream()
+        session = ChatSession(
+            op, scripted_input("!inspect nope", "!quit"), stream
+        )
+        session.start()
+        assert "unknown agent id: nope (0 agents known)" in stream.text
+        assert "status: None" not in stream.text
+    finally:
+        rt.stop()
+
+
+def test_chat_session_inspect_known_id_prints_view():
+    """W6.3: !inspect on a known agent id still prints the read-only view."""
+    rt = make_runtime()
+    try:
+        rt.spawn("a task", driver=DefaultDriver())
+        op = Operator(runtime=rt)
+        stream = FakeStream()
+        session = ChatSession(op, scripted_input("!inspect a1", "!quit"), stream)
+        session.start()
+        assert "inspect a1" in stream.text
+        assert "unknown agent id" not in stream.text
+    finally:
+        rt.stop()
+
+
+def test_chat_banner_lists_all_in_loop_commands():
+    """W6.3: the chat banner lists !quit, !steer and !inspect, each with
+    one-line help, rendered from ChatSession.COMMANDS."""
+    for cmd, help_ in ChatSession.COMMANDS:
+        assert cmd in ("!quit", "!steer <agent_id> <message>",
+                       "!inspect <agent_id>")
+        assert help_  # every command carries one-line help
+    # The banner renders every command line verbatim.
+    banner_lines = [f"  {cmd} — {help_}" for cmd, help_ in ChatSession.COMMANDS]
+    for line in banner_lines:
+        assert line
+    # And the dispatch in start_one covers exactly the advertised set.
+    assert [cmd.split()[0] for cmd, _ in ChatSession.COMMANDS] == [
+        "!quit", "!steer", "!inspect"
+    ]
 
 
 def test_chat_session_eof_exits():
@@ -256,6 +354,49 @@ def test_chat_session_eof_exits():
         session = ChatSession(op, scripted_input(), stream)
         session.start()
         assert stream.text == ""
+    finally:
+        rt.stop()
+
+
+def test_chat_session_echo_banner_on_default_driver():
+    """D3: with the DefaultDriver fallback (driver=None) the first
+    requirement line prints the one-line echo-mode banner, exactly once."""
+    rt = make_runtime()
+    try:
+        op = Operator(runtime=rt)
+        stream = FakeStream()
+        session = ChatSession(op, scripted_input("hello", "again", "!quit"), stream)
+        session.start()
+        banner = (
+            'echo mode: no LLM driver wired — set OPENAI_API_KEY and use '
+            '"python3 -m dhc.ui.terminal" for the real driver'
+        )
+        assert stream.text.count(banner) == 1
+        # The banner precedes the first echoed result.
+        assert stream.text.index(banner) < stream.text.index("hello")
+    finally:
+        rt.stop()
+
+
+def test_chat_session_no_echo_banner_with_real_driver():
+    """D3: when a real driver is wired, no echo-mode banner is printed."""
+    rt = make_runtime()
+    try:
+        op = Operator(runtime=rt)
+
+        def driver(agent):
+            if getattr(driver, "called", False):
+                return None
+            driver.called = True
+            return "complete('custom done')"
+
+        stream = FakeStream()
+        session = ChatSession(
+            op, scripted_input("hello", "!quit"), stream, driver=driver
+        )
+        session.start()
+        assert "echo mode" not in stream.text
+        assert "custom done" in stream.text
     finally:
         rt.stop()
 
@@ -342,6 +483,163 @@ def test_cli_timeout_flag_removed():
     with pytest.raises(SystemExit):
         parser.parse_args(["--timeout", "30"])
     assert "timeout" not in parser.format_help()
+
+
+def test_cli_model_flag_removed():
+    """W6.4: --model is gone from the chat CLI — it only ever fed the banner
+    text (the chat CLI never calls an LLM, INFO-070). The real driver's model
+    is configured via llm.model in harness.json or --model on the terminal."""
+    import dhc.cli as cli
+
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--model", "gpt-4o"])
+    assert "--model" not in parser.format_help()
+    # --mock stays (README quickstart parity) but is a documented no-op.
+    args = parser.parse_args(["--mock"])
+    assert args.mock is True
+    assert "--mock" in parser.format_help()
+
+
+def test_cli_config_flag_loads_explicit_harness_json(tmp_path, monkeypatch):
+    """W5.4: --config PATH loads that harness.json into the runtime's settings
+    (parity with the terminal entry point)."""
+    import json
+
+    import dhc.cli as cli
+
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    cfg = tmp_path / "harness.json"
+    cfg.write_text(json.dumps({"llm": {"model": "w54-test-model"}}), encoding="utf-8")
+
+    captured = {}
+
+    def fake_runtime(**kwargs):
+        captured["settings"] = kwargs.get("settings")
+        rt = type("RT", (), {"start": lambda self: None, "stop": lambda self: None})()
+        return rt
+
+    monkeypatch.setattr(cli, "Runtime", fake_runtime)
+    lines = iter(["!quit"])
+
+    def fake_input(prompt=""):
+        try:
+            return next(lines)
+        except StopIteration:
+            return None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    rc = cli.main(
+        [
+            "--mock",
+            "--config",
+            str(cfg),
+            "--context",
+            str(tmp_path / "context.md"),
+            "--transcript",
+            str(tmp_path / "transcript.md"),
+        ]
+    )
+    assert rc == 0
+    settings = captured["settings"]
+    assert settings is not None
+    assert settings.provider.model == "w54-test-model"
+
+
+def test_cli_config_flag_missing_file_raises(tmp_path, monkeypatch):
+    """W5.4: a missing explicit --config file raises (not a silent no-op)."""
+    import dhc.cli as cli
+
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    with pytest.raises(Exception):
+        cli.main(
+            [
+                "--mock",
+                "--config",
+                str(tmp_path / "nope.json"),
+                "--context",
+                str(tmp_path / "context.md"),
+                "--transcript",
+                str(tmp_path / "transcript.md"),
+            ]
+        )
+
+
+def test_cli_parser_exposes_config_flag():
+    """W5.4: build_parser() exposes --config (help text matches the wiring)."""
+    import dhc.cli as cli
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["--config", "harness.json"])
+    assert args.config == "harness.json"
+    assert "--config" in parser.format_help()
+
+
+def test_cli_banner_lists_all_in_loop_commands(tmp_path, monkeypatch):
+    """W6.3: the chat CLI banner lists !quit, !steer and !inspect with
+    one-line help each (rendered from ChatSession.COMMANDS)."""
+    import io
+
+    import dhc.cli as cli
+
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    lines = iter(["!quit"])
+
+    def fake_input(prompt=""):
+        try:
+            return next(lines)
+        except StopIteration:
+            return None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    captured = io.StringIO()
+    monkeypatch.setattr("sys.stdout", captured)
+    rc = cli.main(
+        [
+            "--mock",
+            "--context",
+            str(tmp_path / "context.md"),
+            "--transcript",
+            str(tmp_path / "transcript.md"),
+        ]
+    )
+    assert rc == 0
+    banner = captured.getvalue()
+    for cmd, help_ in ChatSession.COMMANDS:
+        assert cmd in banner
+        assert help_ in banner
+    assert "commands:" in banner
+
+
+def test_cli_inspect_unknown_id_is_named(tmp_path, monkeypatch):
+    """W6.3: --inspect on an unknown agent id names it loudly instead of
+    printing a blank 'status: None' view."""
+    import io
+
+    import dhc.cli as cli
+
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    captured = io.StringIO()
+    monkeypatch.setattr("sys.stdout", captured)
+    rc = cli.main(
+        [
+            "--mock",
+            "--inspect",
+            "nope",
+            "--context",
+            str(tmp_path / "context.md"),
+            "--transcript",
+            str(tmp_path / "transcript.md"),
+        ]
+    )
+    assert rc == 0
+    out = captured.getvalue()
+    assert "unknown agent id: nope (0 agents known)" in out
+    assert "status: None" not in out
 
 # --------------------------------------------------------------------------- #
 # IMP-001 Step 5: operator.inspect — read-only window into a live workspace

@@ -8,8 +8,8 @@ V-model discipline (analyze → decompose → delegate → verify → synthesize
 terminate).
 
 **Why dhc exists** — mission, principles, and boundaries — lives in
-[`breakdown/00-intent/`](breakdown/00-intent/). The full current-state map
-starts at [`breakdown/README.md`](breakdown/README.md).
+[`docs/breakdown/00-intent/`](docs/breakdown/00-intent/). The full current-state map
+starts at [`docs/breakdown/README.md`](docs/breakdown/README.md).
 
 ## What dhc is
 
@@ -37,31 +37,66 @@ starts at [`breakdown/README.md`](breakdown/README.md).
 
 ## Quick start
 
+**1. Install**
+
 ```bash
 pip install -e .
-dhc --mock            # minimal chat TUI, deterministic mock driver, no API key
 ```
 
-With an API key the real LLM path activates: `export OPENAI_API_KEY=sk-...`
-then `dhc` (real LLM driver, gpt-4o by default). The full quick start and the
-end-to-end value demonstration live in
-[`breakdown/05-operation/`](breakdown/05-operation/).
+**2. Run the demo** — a complete end-to-end session in mock mode
+(deterministic, no API key, no network; finishes in well under a minute):
+
+```bash
+python3 examples/value_demo.py
+```
+
+Exit code 0 on success. The demo runs a root agent that receives a
+**requirement**, **spawns** three children, **awaits** them, aggregates
+their **artifacts**, and **completes** — while one child **fails** and its
+siblings still finish.
+
+**3. The concepts** — that's the whole mental model:
+
+- **requirement** — the task an agent is spawned with; the unit of work.
+- **spawn / await** — a parent spawns children (non-blocking) and awaits
+  them (ensure-terminal) before settling.
+- **complete / fail** — every agent settles in exactly one terminal state,
+  `completed` or `failed`; a failed child never takes down its siblings.
+- **artifacts (publish / read)** — findings persist as immutable,
+  content-addressed artifacts; parents read summaries + ids and pull
+  detail on demand.
+
+**Everything else is a link away:**
+
+- The hands-on tutorial (every code block executed by CI):
+  [`docs/quickstart.md`](docs/quickstart.md)
+- Every name an agent's action block can call (generated, always
+  current): [`docs/agent-api.md`](docs/agent-api.md)
+- The two CLI entry points — `dhc --mock` chat (echo-only: it never calls
+  an LLM; the banner says so) and the real-LLM operator terminal:
+  [`docs/breakdown/05-operation/the-two-entry-points.md`](docs/breakdown/05-operation/the-two-entry-points.md)
+- Full quick start and the value demonstration:
+  [`docs/breakdown/05-operation/quick-start.md`](docs/breakdown/05-operation/quick-start.md)
+- Artifacts in depth:
+  [`docs/breakdown/01-product/use-cases/artifacts/publish-and-consume-artifacts.md`](docs/breakdown/01-product/use-cases/artifacts/publish-and-consume-artifacts.md)
+- All use cases (fan-out, crash containment, recursive decomposition, ...):
+  [`docs/breakdown/01-product/use-cases/`](docs/breakdown/01-product/use-cases/)
 
 ## The map
 
-- **Why it exists** — [`breakdown/00-intent/`](breakdown/00-intent/)
-- **What it promises** — [`breakdown/01-product/`](breakdown/01-product/),
+- **Why it exists** — [`docs/breakdown/00-intent/`](docs/breakdown/00-intent/)
+- **What it promises** — [`docs/breakdown/01-product/`](docs/breakdown/01-product/),
   driven by the use-case leaves under
-  [`breakdown/01-product/use-cases/`](breakdown/01-product/use-cases/)
+  [`docs/breakdown/01-product/use-cases/`](docs/breakdown/01-product/use-cases/)
 - **How it is organized** —
-  [`breakdown/02-architecture/`](breakdown/02-architecture/) (runtime
+  [`docs/breakdown/02-architecture/`](docs/breakdown/02-architecture/) (runtime
   composition, INFO-058)
 - **Where the code lives** —
-  [`breakdown/03-implementation/`](breakdown/03-implementation/) (module
+  [`docs/breakdown/03-implementation/`](docs/breakdown/03-implementation/) (module
   map, INFO-055)
 - **How claims are checked** —
-  [`breakdown/04-verification/`](breakdown/04-verification/) (INFO-056); the
+  [`docs/breakdown/04-verification/`](docs/breakdown/04-verification/) (INFO-056); the
   suite itself: [`tests/`](tests/)
-- **How it is run** — [`breakdown/05-operation/`](breakdown/05-operation/)
+- **How it is run** — [`docs/breakdown/05-operation/`](docs/breakdown/05-operation/)
   (INFO-057)
-- **What might change** — [`breakdown/06-evolution/`](breakdown/06-evolution/)
+- **What might change** — [`docs/breakdown/06-evolution/`](docs/breakdown/06-evolution/)

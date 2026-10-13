@@ -16,7 +16,7 @@ This module mirrors that pattern on dhc's committed surface:
 * :func:`render_text_tree` — pure box-drawn tree renderer, reusing
   :func:`dhc.state.build_agent_tree` (which returns :class:`~dhc.state.AgentNode`
   view-models) and :func:`dhc.state.render_text_tree` for the line format.
-* :func:`main` — CLI entry: ``python3 -m dhc.terminal``. Builds a fully-wired
+* :func:`main` — CLI entry: ``python3 -m dhc.ui.terminal``. Builds a fully-wired
   runtime via :func:`dhc.wiring.build_runtime`, attaches a
   :class:`~dhc.state.StateWriter` rooted at the artifact root's parent, and
   runs the terminal. ``--requirement`` runs once in batch mode.
@@ -124,7 +124,8 @@ class Terminal:
       cancels the running agent; EOF (Ctrl+D) exits.
 
     ``/``-commands: ``/tree``, ``/agents``, ``/artifacts [id]``, ``/events``,
-    ``/stats``, ``/resume <agent_id>``, ``/compact``, ``/help``, ``/quit``.
+    ``/stats``, ``/resume <agent_id>``, ``/compact``, ``/help``, ``/quit``
+    (``/q`` is an alias of ``/quit``).
     """
 
     def __init__(
@@ -346,7 +347,7 @@ class Terminal:
         self._print("  /resume <agent_id> print an agent's checkpoint")
         self._print("  /compact           print a compact summary")
         self._print("  /help              this help")
-        self._print("  /quit              exit the terminal")
+        self._print("  /quit (or /q)      exit the terminal")
         self._print("Anything else is a requirement run through the Operator.")
 
     def _run_command(self, line: str) -> bool:
@@ -373,7 +374,7 @@ class Terminal:
             self._cmd_resume(arg)
         elif cmd == "/compact":
             self._cmd_compact()
-        elif cmd in ("/quit", "/exit"):
+        elif cmd in ("/quit", "/exit", "/q"):
             return False
         else:
             self._print(f"unknown command: {cmd}  (try /help)")
@@ -434,7 +435,7 @@ class Terminal:
             line = line.strip()
             if not line:
                 continue
-            if line.lower() in ("exit", "quit", "/quit", "/exit"):
+            if line.lower() in ("exit", "quit", "/quit", "/exit", "/q"):
                 return 0
             if self._run_command(line):
                 continue
@@ -482,6 +483,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="LLM model name")
     parser.add_argument("--base-url", help="LLM API base URL")
     parser.add_argument("--api-key", help="LLM API key")
+    parser.add_argument(
+        "--inspect",
+        metavar="AGENT_ID",
+        default=None,
+        help="print a read-only workspace view for AGENT_ID and exit "
+        "(parity with the chat CLI's --inspect)",
+    )
     return parser
 
 
@@ -512,10 +520,32 @@ def _apply_provider_overrides(settings: Any, args: argparse.Namespace) -> None:
     )
 
 
+def _inspect_view(runtime: Any, agent_id: str) -> int:
+    """Print a read-only workspace view for *agent_id* (``--inspect``).
+
+    F8 honesty: an unknown id is named loudly — ``unknown agent id: <id>
+    (N agents known)`` — instead of a blank ``status: None`` view.
+    """
+    operator = getattr(runtime, "operator", None)
+    if operator is None:
+        operator = Operator(runtime=runtime)
+    view = operator.inspect(agent_id)
+    if view.get("status") is None:
+        known = len(getattr(runtime, "_agents", None) or {})
+        print(f"unknown agent id: {agent_id} ({known} agents known)")
+        return 0
+    print(f"inspect {agent_id}")
+    print(f"  status: {view.get('status')}")
+    print(f"  result: {view.get('result')}")
+    print(f"  caps: {view.get('caps')}")
+    print(f"  workspace keys: {sorted(view.get('workspace', {}))}")
+    return 0
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     """CLI entry: build a wired runtime and run the Terminal.
 
-    ``python3 -m dhc.terminal`` — interactive REPL by default; with
+    ``python3 -m dhc.ui.terminal`` — interactive REPL by default; with
     ``--requirement TEXT`` (or ``--batch``) runs once in batch mode and
     prints outcome + aggregate + state-file paths. The runtime is built via
     :func:`dhc.wiring.build_runtime` with ``mock=not has_key`` (the mock path
@@ -542,6 +572,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         artifact_root=settings.artifact_root,
     )
     runtime.start()
+    if args.inspect is not None:
+        # --inspect: print the read-only view and exit (no REPL, no
+        # state files). Teardown still runs.
+        try:
+            return _inspect_view(runtime, args.inspect)
+        finally:
+            try:
+                runtime.stop()
+            except Exception:  # noqa: BLE001 - teardown must never mask the exit code
+                pass
 
     writer = StateWriter(runtime, root=Path(settings.artifact_root).parent)
     writer.attach(runtime)

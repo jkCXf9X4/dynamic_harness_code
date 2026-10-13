@@ -39,7 +39,13 @@ import uuid
 from typing import Any, Callable, Optional
 
 from .agent import Agent, AgentHandle, WorkspaceAgent, bash
-from ..errors import ChannelError, TurnError, TurnTimeoutError  # noqa: F401 - re-export
+from .surface import SurfaceEntry, default_registry
+from ..errors import (  # noqa: F401 - re-export
+    ChannelError,
+    TurnError,
+    TurnTimeoutError,
+    UnknownAgentError,
+)
 from ..data.models import (
     TERMINAL_STATES,
     AgentStatus,
@@ -70,7 +76,6 @@ from .caps import (  # noqa: F401 - re-export (caps defaults moved with the watc
     _DEFAULT_MAX_CHILDREN,
     _DEFAULT_MAX_ITERATIONS,
     _DEFAULT_MAX_MESSAGES_PER_STEP,
-    _DEFAULT_TIMEOUT_SECONDS,
     _DEFAULT_MAX_WORKSPACE_BYTES,
 )
 from .pump import _DEFAULT_STEP_TIMEOUT  # noqa: F401 - re-export
@@ -222,7 +227,16 @@ class Runtime:
         # schedule without stealing from the default loop's digest.
         self._tool_event_cursors: dict[str, int] = {}
         self._extra_namespace: dict[str, dict] = {}
+        # W1.3: the ordered namespace-builder chain. The core names come
+        # from _core_namespace (always first); every registration function
+        # (framework tools, channel tools, artifact tools, the wiring root)
+        # appends its builder here instead of reassigning _build_namespace.
+        self._namespace_builders: list[tuple[str, Callable[[Agent], dict]]] = []
         self._lock = threading.RLock()
+        # W1.2: the core surface is registered in the process-wide
+        # registry (the single source of truth the prompt and list_tools
+        # are generated from). Idempotent: re-registering replaces.
+        _register_core_surface()
         self._id_counter = 0
         self._started = False
         self._stopping = False
@@ -230,7 +244,14 @@ class Runtime:
     # -- lifecycle -----------------------------------------------------------
 
     def start(self) -> None:
-        """Boot the runtime (idempotent)."""
+        """Boot the runtime.
+
+        IDEMPOTENT: calling it more than once is a no-op. It only marks the
+        runtime started — it does NOT start any agents. ``spawn()``
+        auto-starts each agent's worker thread (and marks the runtime
+        started as a side effect), so a fresh runtime needs no explicit
+        ``start()`` before the first ``spawn()``.
+        """
         with self._lock:
             self._started = True
 
@@ -260,7 +281,7 @@ class Runtime:
         on_done: Optional[Callable[[Completion], None]] = None,
         parent_id: Optional[str] = None,
         namespace: Optional[dict] = None,
-        _agent_callback: bool = False,
+        agent_callback: bool = False,
     ) -> AgentHandle:
         """Spawn a new agent (non-blocking) and start its worker thread.
 
@@ -268,14 +289,18 @@ class Runtime:
         next code block to execute, or None to settle. Tests use scripted
         drivers; the LLM loop is wired later.
 
-        *on_done* registers a completion callback. When ``_agent_callback`` is
-        True (Agent.spawn), the callback runs in the parent's worker loop
-        between actions, in completion order. Otherwise it is a host-level
-        callback that runs when the agent settles.
+        *on_done* registers a completion callback. When *agent_callback* is
+        True (the internal ``Agent.spawn`` path), the callback is routed to
+        the parent-agent callback registry and runs in the parent's worker
+        loop between actions, in completion order. Otherwise (the default)
+        it is a host-level callback that runs when the agent settles.
 
         *namespace* optionally injects extra names (callables, values) into
         the agent's turn namespace — the seam tests use to hand scripted
         drivers to spawned children.
+
+        ``spawn()`` auto-starts the agent's worker thread; :meth:`start`
+        only boots the runtime itself (idempotent).
         """
         with self._lock:
             if not self._started:
@@ -292,7 +317,7 @@ class Runtime:
             self._handles[agent_id] = AgentHandle(agent_id, self)
             self._stop_flags[agent_id] = threading.Event()
             if on_done is not None:
-                target = self._parent_callbacks if _agent_callback else self._host_callbacks
+                target = self._parent_callbacks if agent_callback else self._host_callbacks
                 target.setdefault(agent_id, []).append(on_done)
             if namespace:
                 self._extra_namespace[agent_id] = dict(namespace)
@@ -459,8 +484,29 @@ class Runtime:
 
     # -- namespace -----------------------------------------------------------
 
-    def _build_namespace(self, agent: Agent) -> dict:
-        """Build the in-code namespace for one turn from the Agent.
+    def register_namespace_builder(
+        self, builder: Callable[[Agent], dict], name: Optional[str] = None
+    ) -> None:
+        """Append *builder* to the ordered namespace-builder chain (W1.3).
+
+        Each builder takes the Agent and returns namespace additions; the
+        composed namespace is the union in registration order (later
+        builders may overwrite earlier names). This replaces the historical
+        private-method reassignment (``runtime._build_namespace = build``):
+        the chain is public, ordered, and inspectable via
+        :attr:`namespace_builders`. The core builder (this class's own
+        ``_core_namespace``) always runs first.
+        """
+        with self._lock:
+            self._namespace_builders.append((name or getattr(builder, "__name__", "builder"), builder))
+
+    @property
+    def namespace_builders(self) -> list[tuple[str, Callable[[Agent], dict]]]:
+        """The registered (name, builder) chain, in registration order."""
+        return list(self._namespace_builders)
+
+    def _core_namespace(self, agent: Agent) -> dict:
+        """The core names every runtime injects (the first builder).
 
         CORE-ONLY names (the architectural goal: core = runtime + eventbus +
         the directed-message primitive, 0015). The artifact store and the
@@ -483,7 +529,7 @@ class Runtime:
             "send": surface.send,
             "complete": surface.complete,
             "fail": surface.fail,
-            "cancel": surface.cancel,
+            "record_result": surface.record_result,
             "status": surface.status,
             "result": surface.result,
             "tool": surface.tool,
@@ -498,6 +544,20 @@ class Runtime:
         extra = self._extra_namespace.get(agent.id)
         if extra:
             ns.update(extra)
+        return ns
+
+    def _build_namespace(self, agent: Agent) -> dict:
+        """Build the in-code namespace for one turn: core + registered builders.
+
+        Composes the core namespace with every builder registered via
+        :meth:`register_namespace_builder`, in registration order. The
+        historical wrap chain (each registration function reassigning
+        ``_build_namespace``) produced exactly this union; this is the same
+        composition, made public and inspectable.
+        """
+        ns = self._core_namespace(agent)
+        for _name, builder in self._namespace_builders:
+            ns.update(builder(agent))
         return ns
 
     def _max_turn_seconds(self) -> Optional[float]:
@@ -623,21 +683,27 @@ class Runtime:
                 if agent_id in self._completions:
                     return self._completions[agent_id]
                 if agent_id not in self._agents:
-                    raise KeyError(f"unknown agent {agent_id!r}")
+                    raise UnknownAgentError(
+                        f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                    )
             time.sleep(0.005)
 
     def poll(self, agent_id: str) -> AgentStatus:
         """Non-blocking: return the agent's current lifecycle state."""
         with self._lock:
             if agent_id not in self._agents:
-                raise KeyError(f"unknown agent {agent_id!r}")
+                raise UnknownAgentError(
+                        f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                    )
             return self._agents[agent_id]._status
 
     def cancel(self, agent_id: str, reason: str = "cancelled") -> Result:
         """Cancel the agent's worker; it settles as cancelled (INFO-034/040)."""
         with self._lock:
             if agent_id not in self._agents:
-                raise KeyError(f"unknown agent {agent_id!r}")
+                raise UnknownAgentError(
+                        f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                    )
             agent = self._agents[agent_id]
             if is_terminal(agent._status):
                 return agent.result() or Result(done=True, ok=False, reason=reason)
@@ -654,36 +720,92 @@ class Runtime:
         return self.result(agent_id)
 
     def status(self, agent_id: str) -> AgentStatus:
-        """Return the agent's current lifecycle state."""
+        """Return the agent's current lifecycle state.
+
+        Host-facing alias of :meth:`poll` — identical behavior (including
+        raising :class:`~dhc.errors.UnknownAgentError` for an unknown id);
+        kept as a distinct name for host/UI callers.
+        """
         return self.poll(agent_id)
 
     def result(self, agent_id: str) -> Result:
         """Return the agent's settled result."""
         with self._lock:
             if agent_id not in self._agents:
-                raise KeyError(f"unknown agent {agent_id!r}")
+                raise UnknownAgentError(
+                        f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                    )
             return self._agents[agent_id].result()
 
     def get(self, agent_id: str) -> Agent:
         """Return the underlying Agent object."""
         with self._lock:
             if agent_id not in self._agents:
-                raise KeyError(f"unknown agent {agent_id!r}")
+                raise UnknownAgentError(
+                        f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                    )
             return self._agents[agent_id]
 
     def children_of(self, agent_id: str) -> list:
         """Return the ids of *agent_id*'s children."""
         with self._lock:
             if agent_id not in self._agents:
-                raise KeyError(f"unknown agent {agent_id!r}")
+                raise UnknownAgentError(
+                        f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                    )
             return list(self._agents[agent_id].children)
 
     def is_settled(self, agent_id: str) -> bool:
         """True once *agent_id* has reached a terminal state."""
         with self._lock:
             if agent_id not in self._agents:
-                raise KeyError(f"unknown agent {agent_id!r}")
+                raise UnknownAgentError(
+                        f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                    )
             return is_terminal(self._agents[agent_id]._status)
+
+    # -- read-only inspection helpers (W4.5) ---------------------------------
+    # Public, read-only views over the runtime's private state so tests and
+    # hosts can inspect the registry / stop flags / caps watchdog WITHOUT
+    # reaching into privates. Each returns a COPY (or a value) the caller
+    # cannot use to mutate the runtime. The privates stay functional; these
+    # are additive, not a forced churn.
+
+    def agents_snapshot(self) -> dict:
+        """A read-only snapshot of the agent registry (id -> Agent).
+
+        Returns a shallow COPY of the registry: mutating the returned dict
+        (or the Agent objects it references) does NOT affect the runtime's
+        registry. Use this instead of reading ``rt._agents`` directly.
+        """
+        with self._lock:
+            return dict(self._agents)
+
+    def is_stopped(self, agent_id: str) -> bool:
+        """True once *agent_id*'s stop flag has been set.
+
+        Read-only view of the per-agent stop flag (the same flag
+        ``cancel``/``stop`` set). Raises
+        :class:`~dhc.errors.UnknownAgentError` for an unknown id. Use this
+        instead of reading ``rt._stop_flags`` directly.
+        """
+        with self._lock:
+            if agent_id not in self._agents:
+                raise UnknownAgentError(
+                    f"unknown agent id {agent_id!r} (runtime knows {len(self._agents)} agents)"
+                )
+            return self._stop_flags[agent_id].is_set()
+
+    def caps_state(self) -> dict:
+        """A read-only view of the caps-watchdog per-agent cursor state.
+
+        Returns a COPY of the message-rate watermark cursors
+        (``agent_id -> int``) the watchdog uses to count per-step fresh
+        events. Mutating the returned dict does NOT affect the watchdog.
+        Use this instead of reading ``rt._caps_cursors`` directly.
+        """
+        with self._lock:
+            return dict(self._caps_cursors)
 
     # -- directed messaging (the framework communication primitive, 0015) --
 
@@ -791,3 +913,137 @@ class Runtime:
     def completion_log(self) -> CompletionLog:
         """Return the at-most-once settlement registry."""
         return self._completion_log
+
+
+# --------------------------------------------------------------------------- #
+# The core surface registration (W1.2)
+# --------------------------------------------------------------------------- #
+
+
+def _register_core_surface() -> None:
+    """Register the core runtime names in the surface registry (idempotent).
+
+    The 13 action names every Runtime injects (plus the pump's yield
+    vocabulary, which is prompt-visible as callables). The registry is
+    metadata: the actual injection stays in ``_core_namespace``; this
+    registration is what the prompt's API section and ``list_tools()``
+    are generated from, and what the conformance test cross-checks.
+    """
+    for entry in (
+        SurfaceEntry(
+            name="agent",
+            fn=None,
+            doc="The agent facade: identity, accounting reads, actions.",
+            tier="core",
+            call="agent",
+        ),
+        SurfaceEntry(
+            name="spawn",
+            fn=WorkspaceAgent.spawn,
+            doc="Spawn a child agent (non-blocking); return its handle.",
+            tier="core",
+            call="spawn(requirement, acceptance=(), driver=None, on_done=None)",
+        ),
+        SurfaceEntry(
+            name="send",
+            fn=WorkspaceAgent.send,
+            doc="Direct message to another agent (the core primitive).",
+            tier="core",
+            call="send(recipient_id, body)",
+        ),
+        SurfaceEntry(
+            name="complete",
+            fn=WorkspaceAgent.complete,
+            doc="Settle the agent as completed.",
+            tier="core",
+            call="complete(headline, artifacts=())",
+        ),
+        SurfaceEntry(
+            name="fail",
+            fn=WorkspaceAgent.fail,
+            doc="Settle the agent as failed.",
+            tier="core",
+            call="fail(reason)",
+        ),
+        SurfaceEntry(
+            name="record_result",
+            fn=WorkspaceAgent.record_result,
+            doc="Record a not-ok last result (does NOT cancel).",
+            tier="core",
+            call="record_result(reason)",
+        ),
+        SurfaceEntry(
+            name="status",
+            fn=WorkspaceAgent.status,
+            doc="The agent's current status.",
+            tier="core",
+            call="status()",
+        ),
+        SurfaceEntry(
+            name="result",
+            fn=WorkspaceAgent.result,
+            doc="The agent's current result.",
+            tier="core",
+            call="result()",
+        ),
+        SurfaceEntry(
+            name="tool",
+            fn=WorkspaceAgent.tool,
+            doc="Run a callable, capturing its output as a ToolResult.",
+            tier="core",
+            call="tool(callable, *args)",
+        ),
+        SurfaceEntry(
+            name="bash",
+            fn=bash,
+            doc="Run a shell command; return the captured output as text.",
+            tier="core",
+            call="bash(cmd)",
+        ),
+        SurfaceEntry(
+            name="await_",
+            fn=WorkspaceAgent.await_,
+            doc="Block until the child settles; return its Completion.",
+            tier="core",
+            call="await_(handle)",
+        ),
+        SurfaceEntry(
+            name="poll",
+            fn=WorkspaceAgent.poll,
+            doc="The child's current status (non-blocking).",
+            tier="core",
+            call="poll(handle)",
+        ),
+        SurfaceEntry(
+            name="children_of",
+            fn=WorkspaceAgent.children_of,
+            doc="Handles of the agent's spawned children.",
+            tier="core",
+            call="children_of(handle)",
+        ),
+        SurfaceEntry(
+            name="Await",
+            fn=Await,
+            doc="Yield vocabulary: block the runner until the child settles.",
+            tier="advanced",
+        ),
+        SurfaceEntry(
+            name="Poll",
+            fn=Poll,
+            doc="Yield vocabulary: check the child, then resume.",
+            tier="advanced",
+        ),
+        SurfaceEntry(
+            name="Sleep",
+            fn=Sleep,
+            doc="Yield vocabulary: pause the runner for a beat.",
+            tier="advanced",
+        ),
+    ):
+        default_registry.register(entry)
+
+
+# The core surface is registered at import time (W1.2): the registry
+# must be populated before any runtime exists — the prompt layer renders
+# from it without holding a runtime instance.
+_register_core_surface()

@@ -295,3 +295,63 @@ Week 4:  W5 (config) → W7 (generated docs) → deletion wave for tiered-out
 ```
 
 Fast track if time-boxed to one week: W0 + W1 + W2 — that closes both Critical findings and all four High onboarding findings, and leaves the API consolidation (W3) as a clean follow-up.
+
+---
+
+# Remediation status (2026-10)
+
+> Appended after the waves landed. Everything above this marker is the
+> original plan, unchanged — the historical record. Per-wave status
+> below, each with a one-line evidence pointer. The review is
+> `docs/interface-review.md` (its findings F1–F10 and their status are
+> tabulated in its own addendum); the breakdown summary is
+> `docs/breakdown/05-operation/interface-remediation-waves.md` (INFO-073).
+
+## Wave status
+
+| Wave | Scope | Status | Evidence |
+|------|-------|--------|----------|
+| W0 | Safety net & drift guard | **Landed** | baseline suite green before any change; `tests/llm/test_prompt_conformance.py` (5 tests) |
+| W1 | Surface registry | **Landed** | `src/dhc/framework/surface.py` — 47 entries (29 core / 3 advanced / 15 internal); prompt API section generated via `registry.prompt_section()`; `docs/agent-api.md` generated from the same registry |
+| W2 | Onboarding truth | **Landed** | README links resolve; echo banner (`src/dhc/cli.py:54-80`); `examples/value_demo.py` portable, guarded by `tests/test_value_demo_clean.py` |
+| W3 | Agent API consolidation | **Landed** | `Message.id` (`src/dhc/data/models.py:316`); artifact coercion; `room_name`; `ack`/`answers`/`gather`; `ask_operator` returns a qid (`src/dhc/tooling/channel_tools.py:179`); loud errors |
+| W4 | Embedder hygiene | **Landed** | typed `WiredRuntime` (`src/dhc/wiring.py:233`); `UnknownAgentError` (`src/dhc/errors.py:41`); `Agent.record_result` (`src/dhc/framework/agent.py:280`); `agents_snapshot`/`is_stopped`/`caps_state` (`src/dhc/framework/runtime.py:774-799`) |
+| W5 | Config unification | **Landed** | `HarnessConfig` canonical, `Settings` view (`src/dhc/data/config.py`); `ALIASES` + `DeprecationWarning` (`src/dhc/framework/caps.py:139`); generated `harness.json.example` (`tools/generate_harness_example.py`); `--config` flag |
+| W6 | Operator UX | **Landed** | honest `!steer` (`src/dhc/ui/operator.py:177-202`); default `CheckpointStore` (W6.1, `src/dhc/wiring.py:384`); `ChatSession.COMMANDS` banner; `/q`; `--model` removed from chat; `--mock` documented no-op |
+| W7 | Generated docs & guardrails | **Landed** | `docs/quickstart.md` executed by `tests/docs/test_quickstart_docs.py`; `docs/agent-api.md` generated + freshness test `tests/docs/test_agent_api_docs.py`; README quick start ≤14 concepts; breakdown truth pass (INFO-073 + amendments) |
+
+## Deviations from the plan, accepted
+
+- **W4.4 / D1 — `run_block` timeout.** The plan said remove the param
+  "after grep confirms no caller passes it". At W4 close-out the
+  fabrication kit's wrapper (`src/dhc/tooling/fabrication.py:236`) still
+  passed it through, so the precondition was unmet and the param stayed
+  as a documented no-op. Resolved in the W7 close-out: the param is gone
+  from both `ReplEngine.run_block` (`src/dhc/framework/repl.py:238`)
+  and the kit's wrapper; grep shows no caller passes a timeout; the
+  docstring states the outer step timeout is the only bound.
+- **W5 — `max_turn_seconds` kept.** The plan's W5 considered folding it
+  into the LLM call timeout; it is deliberately kept as a distinct
+  per-step timeout (the step budget), with `llm.call_timeout_seconds`
+  as the LLM call timeout. Two budgets, both enforced.
+- **W4 — `artifact_store_real`.** Deprecated forwarding property to
+  `runtime.artifact_store` (the `StoreAdapter`), not deleted; removal
+  follows the §12.3 deletion wave.
+- **W7.4 — INFO-050.** The plan's W7.4 list named INFO-050 as
+  "superseded prompt composition"; the actual prompt-composition record
+  is INFO-064 (the driver seam), which was amended instead. INFO-050
+  (the per-agent REPL contract) needed no change — verified by grep
+  before skipping.
+
+## Definition of done (§15) — final state
+
+1. All work items checked; suite ≥ 646 passing, 0 real failures
+   (baseline 646; W7 adds 8 docs tests).
+2. Each wave's acceptance criteria met — test names listed above.
+3. Deprecations emitted where policy requires; no hand-maintained API
+   copy anywhere: the prompt section and `docs/agent-api.md` are both
+   generated from the registry (freshness tests guard both).
+4. `docs/breakdown/` amended — INFO-073 written; INFO-022/064/065/070
+   and the module-map/test-strategy/entry-points/quick-start pages
+   corrected; `pb check --strict` clean.
+5. All changes left uncommitted for manual review.

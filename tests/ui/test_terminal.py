@@ -253,6 +253,29 @@ def test_quit_lowercase_exits(tmp_path):
     assert code == 0
 
 
+def test_q_alias_exits(tmp_path):
+    """W6.3: /q is an alias of /quit — it exits the terminal."""
+    rt, writer, term = make_terminal(tmp_path, "/q")
+    code = term.run()
+    assert code == 0
+
+
+def test_q_alias_not_treated_as_requirement(tmp_path):
+    """W6.3: /q must not be run as a requirement (no outcome line)."""
+    rt, writer, term = make_terminal(tmp_path, "/q")
+    code = term.run()
+    assert code == 0
+    assert "outcome:" not in term.output_stream.text
+
+
+def test_help_lists_q_alias(tmp_path):
+    """W6.3: /help documents the /q alias."""
+    rt, writer, term = make_terminal(tmp_path, "/help", "/quit")
+    code = term.run()
+    assert code == 0
+    assert "/q" in term.output_stream.text
+
+
 # --------------------------------------------------------------------------- #
 # Interactive requirement lines
 # --------------------------------------------------------------------------- #
@@ -414,6 +437,44 @@ def test_terminal_parser_still_accepts_config_flag():
     help_text = parser.format_help()
     assert "--config" in help_text
     assert "harness.json" in help_text
+
+
+def test_terminal_parser_exposes_inspect_flag():
+    """W6.3: build_parser() exposes --inspect (parity with the chat CLI)."""
+    parser = terminal_module.build_parser()
+    args = parser.parse_args(["--inspect", "a1"])
+    assert args.inspect == "a1"
+    assert "--inspect" in parser.format_help()
+
+
+def test_main_inspect_unknown_id_is_named(tmp_path, monkeypatch, capsys):
+    """W6.3: --inspect on an unknown agent id names it loudly instead of
+    printing a blank 'status: None' view."""
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    code = main(["--inspect", "nope", "--mock"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "unknown agent id: nope (0 agents known)" in out
+    assert "status: None" not in out
+
+
+def test_main_inspect_known_id_prints_view(tmp_path, monkeypatch, capsys):
+    """W6.3: --inspect on a known agent id prints the read-only view."""
+    monkeypatch.setenv("DHC_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DHC_WORKSPACE_ROOT", str(tmp_path))
+    # Pre-seed a runtime with a settled agent and hand it to main().
+    rt = build_runtime(mock=True, artifact_root=tmp_path / "artifacts")
+    rt.start()
+    rt.spawn("a task", driver=MockDriver.single("complete('done')"))
+    rt.await_("a1")
+    monkeypatch.setattr(terminal_module, "build_runtime", lambda **kwargs: rt)
+    code = main(["--inspect", "a1", "--mock"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "inspect a1" in out
+    assert "unknown agent id" not in out
+    rt.stop()
 
 
 # --------------------------------------------------------------------------- #

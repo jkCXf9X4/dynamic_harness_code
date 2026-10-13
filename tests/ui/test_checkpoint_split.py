@@ -14,11 +14,11 @@ split, not a vision violation:
 
 These tests pin that split so it cannot silently drift:
 
-* the production runtime never instantiates the on-disk store (operator-only,
-  dormant in production);
+* the wired runtime carries a default on-disk ``CheckpointStore`` (W6.1:
+  ``/resume`` works out of the box) — the operator's side of the split;
 * the terminal's ``/resume`` reads the operator's ``runtime.checkpoint_store``
-  (the operator's side), and finds nothing when the store is absent — it never
-  falls back to the agent's workspace checkpoints;
+  (the operator's side) and never falls back to the agent's workspace
+  checkpoints;
 * the agent's workspace ``checkpoint`` citizen writes only to
   ``state["checkpoints"]`` and never to the on-disk store (the two mechanisms
   are independent).
@@ -62,17 +62,17 @@ def _wired(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def test_production_runtime_has_no_on_disk_checkpoint_store(tmp_path):
-    """The on-disk ``CheckpointStore`` is the operator's resumability
-    mechanism, not a live production mechanism: ``build_runtime`` never
-    instantiates it, so the runtime carries no ``checkpoint_store``.
-
-    This is the crux of the H-06 split — the on-disk store is dormant in
-    production, which is why the agent cannot (and should not) read it.
+def test_wired_runtime_carries_default_on_disk_checkpoint_store(tmp_path):
+    """W6.1: ``build_runtime`` now attaches a default on-disk
+    ``CheckpointStore`` so ``/resume`` works out of the box. The store is the
+    operator's side of the H-06 split — the agent's workspace checkpoint
+    mechanism is separate and never reads it (pinned in
+    ``test_workspace_checkpoint_is_independent_of_on_disk_store``).
     """
     rt = _wired(tmp_path)
     try:
-        assert getattr(rt, "checkpoint_store", None) is None
+        store = getattr(rt, "checkpoint_store", None)
+        assert isinstance(store, CheckpointStore)
     finally:
         rt.stop()
 
@@ -92,10 +92,11 @@ def test_terminal_resume_reads_operator_store(tmp_path):
     try:
         term = Terminal(runtime=rt)
 
-        # Production: no on-disk store -> /resume finds nothing.
+        # Default store (W6.1) with no checkpoint for a1 -> /resume finds
+        # nothing (it never falls back to workspace checkpoints).
         assert term._checkpoint("a1") is None
 
-        # The operator attaches the on-disk store -> /resume reads it.
+        # The operator attaches a store with a checkpoint -> /resume reads it.
         store = CheckpointStore(tmp_path / "checkpoints")
         store.save(AgentCheckpoint(agent_id="a1", turn_counter=3))
         rt.checkpoint_store = store
@@ -131,8 +132,11 @@ def test_workspace_checkpoint_is_independent_of_on_disk_store(tmp_path):
         assert "checkpoints" in kit["state"]
         assert kit["state"]["checkpoints"][0]["note"] == "milestone"
 
-        # It never touches the on-disk store: the production runtime has no
-        # checkpoint_store, and the workspace checkpoint does not create one.
-        assert getattr(rt, "checkpoint_store", None) is None
+        # It never touches the on-disk store: the workspace checkpoint does
+        # not create a checkpoint in the operator's on-disk store (W6.1
+        # attaches a default store, but the agent's mechanism stays separate).
+        store = getattr(rt, "checkpoint_store", None)
+        if store is not None:
+            assert store.load(agent.id) is None
     finally:
         rt.stop()

@@ -156,7 +156,118 @@ def test_ask_operator_tool():
     runtime, *_, questions = _wired()
     _register(runtime, "a1")
     ns = _namespace(runtime, agent_id="a1")
-    event = ns["ask_operator"]("which provider?")
-    assert event.kind == EventKind.operator_question
-    assert event.agent_id == "a1"
-    assert questions.pending_questions()
+    qid = ns["ask_operator"]("which provider?")
+    # W3.6: the tool returns the question id itself — no payload excavation.
+    assert isinstance(qid, str) and qid
+    pending = questions.pending_questions()
+    assert len(pending) == 1
+    assert pending[0].payload["event_id"] == qid
+    assert pending[0].agent_id == "a1"
+
+
+# --------------------------------------------------------------------------- #
+# Wave 3: W3.3 (messenger.read round-trip), W3.4 (room_name unification),
+# W3.7 (room_messages + channel_read demotion), W3.10 (unknown room is loud)
+# --------------------------------------------------------------------------- #
+
+
+def test_messenger_read_round_trip_from_inbox():
+    """W3.3: inbox() -> read(m.id) round-trips end-to-end via the facade."""
+    from dhc.data.models import Message
+
+    runtime, *_ = _wired()
+    _register(runtime, "a1")
+    _register(runtime, "a2")
+    ns1 = _namespace(runtime, agent_id="a1")
+    ns2 = _namespace(runtime, agent_id="a2")
+
+    ns1["messenger"].send("a2", "hello there")
+
+    inbox = ns2["messenger"].inbox()
+    assert len(inbox) == 1
+    m = inbox[0]
+    assert isinstance(m, Message)
+    assert m.id  # the id is carried from the event payload
+    assert m.body == "hello there"
+    assert m.sender_id == "a1"
+    assert m.recipient_id == "a2"
+
+    # read(m.id) returns the same message and marks it read.
+    assert ns2["messenger"].unread_count() == 1
+    got = ns2["messenger"].read(m.id)
+    assert got is not None
+    assert got.body == "hello there"
+    assert got.id == m.id
+    assert ns2["messenger"].unread_count() == 0
+
+
+def test_room_messages_does_not_join():
+    """W3.7: room_messages is a non-joining read — the caller never
+    appears in member_ids, and the traffic is visible to non-members."""
+    runtime, *_ = _wired()
+    _register(runtime, "a1")
+    _register(runtime, "a2")
+    ns1 = _namespace(runtime, agent_id="a1")
+    ns2 = _namespace(runtime, agent_id="a2")
+
+    # a1 joins and posts; a2 only reads.
+    ns1["room"]("war-room")
+    ns1["post"]("war-room", "traffic")
+
+    seen = ns2["room_messages"]("war-room")
+    assert [m.body for m in seen] == ["traffic"]
+    # a2 never joined: not a member.
+    assert "a2" not in ns1["room"]("war-room").member_ids
+
+
+def test_channel_read_topic_keyword_deprecated():
+    """W3.4: channel_read(topic=...) still works but warns."""
+    runtime, *_ = _wired()
+    _register(runtime, "a1")
+    ns = _namespace(runtime, agent_id="a1")
+    ns["room"]("war-room")
+    ns["post"]("war-room", "hello room")
+
+    with pytest.warns(DeprecationWarning):
+        seen = ns["channel_read"](topic="war-room")
+    assert [m.body for m in seen] == ["hello room"]
+
+
+def test_channel_read_and_room_messages_unknown_room_raises():
+    """W3.10: reading an unknown room is a loud ChannelError naming it."""
+    from dhc.errors import ChannelError
+
+    runtime, *_ = _wired()
+    _register(runtime, "a1")
+    ns = _namespace(runtime, agent_id="a1")
+
+    with pytest.raises(ChannelError, match="ghost-room"):
+        ns["room_messages"]("ghost-room")
+    with pytest.raises(ChannelError, match="ghost-room"):
+        ns["channel_read"]("ghost-room")
+
+
+def test_room_positional_and_post_unchanged():
+    """W3.4: room(room_name) positional and post(room_name, body) unchanged."""
+    runtime, *_ = _wired()
+    _register(runtime, "a1")
+    ns = _namespace(runtime, agent_id="a1")
+
+    room = ns["room"]("war-room")
+    assert room.name == "war-room"
+    assert "a1" in room.member_ids
+
+    msg = ns["post"]("war-room", "hello room")
+    assert msg.body == "hello room"
+    assert [m.body for m in ns["room_messages"]("war-room")] == ["hello room"]
+
+
+def test_channel_read_tier_demoted_room_messages_core():
+    """W3.7: channel_read is advanced, room_messages is core; both listed."""
+    from dhc.framework.surface import default_registry
+
+    assert default_registry.get("channel_read").tier == "advanced"
+    assert default_registry.get("room_messages").tier == "core"
+    listed = default_registry.list_tools()
+    assert "channel_read" in listed
+    assert "room_messages" in listed

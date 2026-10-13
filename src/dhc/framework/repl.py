@@ -64,7 +64,7 @@ class ReplEngine:
     - ``suspend(agent_id) -> None``
     - ``resume(agent_id) -> None``
     - ``kill(agent_id) -> None``
-    - ``run_block(agent_id, code, timeout=None) -> Result``
+    - ``run_block(agent_id, code) -> Result``
     - ``reset(agent_id) -> None``
     - ``globals_for(agent_id) -> dict``
     - ``has_workspace(agent_id) -> bool``
@@ -122,9 +122,9 @@ class ReplEngine:
       against the workspace WITHOUT taking the per-agent lock (the pump
       already holds it during an advance), so a nested ``run_block`` from
       inside a generator step does not deadlock. A runaway nested block is
-      caught only by the outer step timeout; ``run_block``'s own ``timeout``
-      argument is accepted for API compatibility and is not enforced by the
-      nested call.
+      caught only by the outer step timeout; ``run_block`` takes no timeout
+      of its own (a nested timeout would be unenforced — the outer step
+      timeout is the only bound).
     """
 
     def __init__(self) -> None:
@@ -235,15 +235,13 @@ class ReplEngine:
             if agent_id in self._runners:
                 self._abandon_runner(agent_id)
 
-    def run_block(
-        self, agent_id: str, code: str, timeout: float | None = None
-    ) -> Result:
+    def run_block(self, agent_id: str, code: str) -> Result:
         """Execute *code* against the agent's workspace WITHOUT the lock.
 
         Reentrant nested exec: safe to call from inside an advance (the pump
         already holds the per-agent lock during a step). A runaway nested
-        block is caught only by the outer step timeout; *timeout* is accepted
-        for API compatibility and is not enforced here.
+        block is caught only by the outer step timeout; there is no nested
+        timeout parameter (it would be unenforced).
         """
         with self._dict_lock:
             workspace = self._workspaces.get(agent_id)

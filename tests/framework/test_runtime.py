@@ -12,7 +12,7 @@ import time
 import pytest
 
 from dhc.framework.agent import Agent, AgentHandle, ToolResult
-from dhc.errors import ChannelError
+from dhc.errors import ChannelError, UnknownAgentError
 from dhc.data.models import (
     TERMINAL_STATES,
     AgentStatus,
@@ -109,7 +109,7 @@ def test_agent_complete_fail_cancel_status_result():
     failed = agent.fail("nope")
     assert failed.done and not failed.ok and failed.reason == "nope"
 
-    cancelled = agent.cancel("stop")
+    cancelled = agent.record_result("stop")
     assert cancelled.done and not cancelled.ok and cancelled.reason == "stop"
 
     st = agent.status()
@@ -227,13 +227,13 @@ def test_result_returns_settled_result():
     rt.stop()
 
 
-def test_unknown_agent_raises_keyerror():
+def test_unknown_agent_raises_unknown_agent_error():
     rt = make_runtime()
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownAgentError):
         rt.poll("nope")
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownAgentError):
         rt.await_("nope")
-    with pytest.raises(KeyError):
+    with pytest.raises(UnknownAgentError):
         rt.cancel("nope")
     rt.stop()
 

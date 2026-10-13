@@ -80,6 +80,42 @@ FABRICATION_NAMES: tuple[str, ...] = (
     "build_prompt",
 )
 
+#: The one-line docs for the kit's surface entries (tier internal —
+#: injected machinery, never prompt-visible; W1.2).
+_KIT_ENTRY_DOCS: dict[str, str] = {
+    "__runner": "The default agent loop source (workspace citizen).",
+    "decide": "The default decision fabrication (driver -> next block).",
+    "run_block": "Execute one block in the agent's persistent REPL.",
+    "context": "The workspace context citizen (guardrails, budgets, state).",
+    "ensure_fabrication": "Re-seed missing kit citizens after a wipe.",
+    "checkpoint": "Persist recoverable progress for this agent.",
+    "rollback": "Restore the workspace from the last checkpoint.",
+    "compact": "Compact the agent's workspace context.",
+    "caps": "The message-rate caps watchdog view for this agent.",
+    "build_prompt": "The default prompt assembly (workspace citizen).",
+    "state": "The kit's persistent state dict.",
+    "observe": "Consume the agent's own settled events.",
+    "settle": "Settle the agent from workspace code.",
+    "acceptance_met": "True when the acceptance criteria are met.",
+    "settle_completed": "Settle the agent as completed.",
+}
+
+
+def _register_kit_surface() -> None:
+    """Register the kit names in the surface registry (tier internal).
+
+    Idempotent, metadata-only: the injection itself is unchanged (the
+    wiring root's builder installs the kit); this registration only
+    records the names so the registry is the complete source of truth
+    (the conformance test cross-checks it against the wired namespace).
+    """
+    from ..framework.surface import SurfaceEntry, default_registry
+
+    for name, doc in _KIT_ENTRY_DOCS.items():
+        default_registry.register(
+            SurfaceEntry(name=name, fn=None, doc=doc, tier="internal")
+        )
+
 
 class FabricationContext:
     """The ``context`` workspace citizen (IMP-001 D4).
@@ -197,9 +233,9 @@ def make_run_block(
     the pump.
     """
 
-    def run_block(code: str, timeout: Optional[float] = None) -> Any:
+    def run_block(code: str) -> Any:
         engine.inject_nolock(agent_id, namespace_builder())
-        return engine.run_block(agent_id, code, timeout)
+        return engine.run_block(agent_id, code)
 
     return run_block
 
@@ -550,3 +586,7 @@ def fabrication_kit(runtime: Any, engine: Any, agent: Any) -> dict:
         "acceptance_met": acceptance_met,
         "settle_completed": settle_completed,
     }
+
+# The kit's surface entries are registered at import time (W1.2): the
+# registry must be complete before any runtime is wired.
+_register_kit_surface()

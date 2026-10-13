@@ -34,7 +34,8 @@ The suite verifies the runtime at three levels: mirrored unit suites, an archite
   - `build_runtime` hands in the kit factory from `dhc.tooling.fabrication`.
 - **Operator files**: `state.py` and `checkpoint.py` live in `dhc.ui`, never in the framework.
 - **Store unawareness**: `Runtime.__init__` and `Agent.__init__` take no `artifact_store` parameter.
-- **Message primitive**: `send` binds in the core namespace; channel tools `room`, `messenger`, `escalate`, `ask_operator`, `post`, `channel_read` stay out.
+- **Message primitive**: `send` binds in the core namespace; channel tools `room`, `messenger`, `escalate`, `ask_operator`, `post`, `room_messages`, `channel_read` stay out.
+- **Tier moves (W3)**: the conformance test pins the registry's core tier against the prompt. Core: `read_artifact`, `list_artifacts`, `post`, `room_messages`, `ack`, `answers`, `gather`, `Await`/`Poll`/`Sleep`. Advanced: `channel_read` (deprecated alias of `room_messages`), `messenger` (prefer `send`).
 
 ## Integration through build_runtime
 
@@ -43,7 +44,7 @@ The suite verifies the runtime at three levels: mirrored unit suites, an archite
   - Full session: root spawns three children, two complete, one fails contained, root aggregates and settles.
   - Boundary log records `spawned`, `settled`, `published` with causal ids.
   - Double settlement raises `ChannelError` — settlement is at-most-once.
-  - Disclosure tiers `headline`, `summary`, `report` round-trip through the real store.
+  - Disclosure: `read_artifact` exposes five levels — `headline`, `summary`, `report`, plus `full`/`raw` as aliases of `report`; the integration test round-trips the three real tiers through the store.
   - `driver_from_settings` picks `MockDriver` without an API key; `mock=True` forces it with one.
   - A messenger message crosses the boundary log as kind `messaged`.
 

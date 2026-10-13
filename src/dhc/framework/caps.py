@@ -8,53 +8,115 @@ is exceeded. All runtime-state access (the lock-guarded child count, the
 event-bus drain) is supplied by the caller as lazy thunks so this predicate
 stays pure and side-effect-free.
 
-Cap names (the crash-event payload keys): ``wall_clock``, ``iterations``,
-``children``, ``workspace_bytes``, ``messages_per_step``.
+Cap names (the crash-event payload keys, :data:`CAP_NAMES`): ``wall_clock``,
+``iterations``, ``children``, ``workspace_bytes``, ``messages_per_step``.
+Deprecated settings-style spellings (``max_iterations``, ``timeout_seconds``,
+``max_children``, ``max_agents``, ...) are accepted as budget keys via the
+single :data:`ALIASES` table and emit a :class:`DeprecationWarning` (W5.2).
 """
 
 from __future__ import annotations
 
 import time
+import warnings
 from typing import Any, Callable, Optional
 
-#: Caps watchdog defaults (overridable via settings; Step 5 owns full config:
-#: SafetyConfig.max_workspace_bytes / max_children / max_messages_per_step).
-_DEFAULT_TIMEOUT_SECONDS = 7200.0
+from ..data.config import SafetyConfig
+
+# Cap names (the crash-event payload keys) — the canonical vocabulary (W5.2).
+CAP_NAMES = (
+    "wall_clock",
+    "iterations",
+    "children",
+    "workspace_bytes",
+    "messages_per_step",
+)
+
+# Cap name -> the SafetyConfig field that configures it (W5.2: one table).
+_CAP_FIELDS = {
+    "wall_clock": "timeout_seconds",
+    "iterations": "max_iterations",
+    "children": "max_children",
+    "workspace_bytes": "max_workspace_bytes",
+    "messages_per_step": "max_messages_per_step",
+}
+
+#: Runtime defaults for caps whose SafetyConfig field is None by default
+#: (children / workspace_bytes) plus the iterations floor. These are the
+#: runtime's own floors, not config knobs. The wall-clock default comes from
+#: the canonical SafetyConfig model (single source of truth) — the old
+#: ``_DEFAULT_TIMEOUT_SECONDS`` constant dies (W5.2).
 _DEFAULT_MAX_ITERATIONS = 400
 _DEFAULT_MAX_CHILDREN = 32
 _DEFAULT_MAX_WORKSPACE_BYTES = 1 << 20  # 1 MiB
 #: Message-rate cap is disabled by default; enforced only when settings
-#: provide ``max_messages_per_step`` (Step 5 owns full config).
+#: provide ``max_messages_per_step``.
 _DEFAULT_MAX_MESSAGES_PER_STEP = None
 
 
-def read_cap(settings: Any, name: str, default: Any) -> Any:
-    """Read a cap from *settings* None-safely (safety config first).
+class ConfigResolver:
+    """Resolves cap ceilings from a Settings view (W5.1: one resolver).
 
-    Moved from ``Runtime._cap``: safety.<name> wins, then the top-level
-    settings attribute, then *default*.
+    The ceiling ALWAYS comes from the runtime's config (guarantee R3):
+    ``safety.<field>`` wins, then the runtime default. This is the single
+    place a cap is resolved from settings — no ad-hoc merges.
     """
-    s = settings
-    if s is None:
-        return default
-    safety = getattr(getattr(s, "config", None), "safety", None)
-    if safety is not None:
-        value = getattr(safety, name, None)
-        if value is not None:
-            return value
-    return getattr(s, name, default)
+
+    def __init__(self, settings: Any):
+        self._settings = settings
+
+    def _safety(self) -> Any:
+        return getattr(getattr(self._settings, "config", None), "safety", None)
+
+    def resolve(self, cap: str) -> Any:
+        """The configured ceiling for *cap* (a cap name), or None if unset.
+
+        ``safety.<field>`` wins; for the children cap the deprecated
+        ``max_agents`` alias is honored as a fallback; then the runtime
+        default (derived from the canonical SafetyConfig model for
+        wall_clock, a module floor for the rest).
+        """
+        field = _CAP_FIELDS.get(cap)
+        if field is None:
+            return None
+        safety = self._safety()
+        if safety is not None:
+            value = getattr(safety, field, None)
+            if value is not None:
+                return value
+            if cap == "children":
+                # max_agents is a deprecated alias of max_children (W5.2).
+                legacy = getattr(safety, "max_agents", None)
+                if legacy is not None:
+                    return legacy
+        if cap == "wall_clock":
+            # The SafetyConfig field is the single source of the default
+            # (W5.2: _DEFAULT_TIMEOUT_SECONDS dies).
+            return SafetyConfig().timeout_seconds
+        if cap == "iterations":
+            return _DEFAULT_MAX_ITERATIONS
+        if cap == "children":
+            return _DEFAULT_MAX_CHILDREN
+        if cap == "workspace_bytes":
+            return _DEFAULT_MAX_WORKSPACE_BYTES
+        if cap == "messages_per_step":
+            return _DEFAULT_MAX_MESSAGES_PER_STEP
+        return None
+
+
+def read_cap(settings: Any, name: str, default: Any = None) -> Any:
+    """Read a cap from *settings* (W5.1: resolves through ConfigResolver).
+
+    *name* is a cap name (see :data:`CAP_NAMES`). The *default* is retained
+    for signature compatibility; the resolver derives the runtime default
+    from the canonical SafetyConfig model.
+    """
+    return ConfigResolver(settings).resolve(name)
 
 
 def cap_limit(cap: str, settings: Any) -> Any:
     """The configured limit for a cap name (for the crash event payload)."""
-    return {
-        "wall_clock": read_cap(settings, "timeout_seconds", _DEFAULT_TIMEOUT_SECONDS),
-        "iterations": read_cap(settings, "max_iterations", _DEFAULT_MAX_ITERATIONS),
-        "children": read_cap(settings, "max_children", None)
-        or read_cap(settings, "max_agents", _DEFAULT_MAX_CHILDREN),
-        "workspace_bytes": read_cap(settings, "max_workspace_bytes", _DEFAULT_MAX_WORKSPACE_BYTES),
-        "messages_per_step": read_cap(settings, "max_messages_per_step", _DEFAULT_MAX_MESSAGES_PER_STEP),
-    }.get(cap)
+    return ConfigResolver(settings).resolve(cap)
 
 
 # --------------------------------------------------------------------------- #
@@ -68,22 +130,43 @@ def cap_limit(cap: str, settings: Any) -> Any:
 # (guarantee R3: the agent never supplies the ceiling itself). Sanitization
 # is defensive: wrong type / None / NaN / <= 0 -> treated as unset.
 
-#: Agent-set budget keys -> the cap each can tighten. Both the
-#: settings-style names (``max_iterations`` ...) and the cap-name aliases
-#: (the crash-event payload keys) are accepted.
-_BUDGET_CAP_KEYS = {
+#: Deprecated budget-key spellings -> the canonical cap name (W5.2: one
+#: explicit table). The canonical vocabulary is :data:`CAP_NAMES` (the
+#: crash-event payload keys); these settings-style spellings are accepted
+#: for backward compatibility but emit a :class:`DeprecationWarning` on use.
+#: ``max_agents`` and ``max_children`` are both aliases of the ``children``
+#: cap — one definition, two accepted spellings, one warning.
+ALIASES: dict[str, str] = {
     "max_iterations": "iterations",
     "timeout_seconds": "wall_clock",
     "max_children": "children",
     "max_agents": "children",
     "max_workspace_bytes": "workspace_bytes",
     "max_messages_per_step": "messages_per_step",
-    "iterations": "iterations",
-    "wall_clock": "wall_clock",
-    "children": "children",
-    "workspace_bytes": "workspace_bytes",
-    "messages_per_step": "messages_per_step",
 }
+
+
+def resolve_budget_key(key: Any) -> Optional[str]:
+    """Map a budget key to a canonical cap name (W5.2).
+
+    A canonical cap name (:data:`CAP_NAMES`) resolves to itself (no warning).
+    A deprecated alias (:data:`ALIASES`) resolves to its canonical cap name
+    and emits a :class:`DeprecationWarning`. Anything else (non-str, unknown)
+    returns None (treated as unset).
+    """
+    if not isinstance(key, str):
+        return None
+    if key in CAP_NAMES:
+        return key
+    cap = ALIASES.get(key)
+    if cap is not None:
+        warnings.warn(
+            f"budget key {key!r} is deprecated; use the cap name {cap!r}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cap
+    return None
 
 
 def sanitize_budget(value: Any) -> Optional[float]:
@@ -119,7 +202,7 @@ def agent_budgets(engine: Any, agent_id: str) -> dict:
         return {}
     out: dict = {}
     for key, value in budgets.items():
-        cap = _BUDGET_CAP_KEYS.get(key) if isinstance(key, str) else None
+        cap = resolve_budget_key(key)
         if cap is None:
             continue
         sanitized = sanitize_budget(value)
@@ -183,13 +266,14 @@ def cap_hit(
     disabled, or pending events would be consumed.
     """
     budgets = agent_budgets(engine, agent_id)
+    resolver = ConfigResolver(settings)
     # Wall clock (safety.timeout_seconds), parked time credited (0008).
     # H-04 (decision 0010): the comparison is MONOTONIC on both sides —
     # started_ts is set with time.monotonic() by the pump, and the credit
     # is measured with time.monotonic() by the pump's park servicing. One
     # base end-to-end: a wall-clock jump can neither trip nor mask the cap.
     timeout_seconds, wall_src = clamp_limit(
-        read_cap(settings, "timeout_seconds", _DEFAULT_TIMEOUT_SECONDS),
+        resolver.resolve("wall_clock"),
         budgets.get("wall_clock"),
     )
     if timeout_seconds is not None and (
@@ -198,23 +282,23 @@ def cap_hit(
         return {"cap": "wall_clock", "limit": timeout_seconds, "source": wall_src}
     # Step count (safety.max_iterations).
     max_iterations, iter_src = clamp_limit(
-        read_cap(settings, "max_iterations", _DEFAULT_MAX_ITERATIONS),
+        resolver.resolve("iterations"),
         budgets.get("iterations"),
     )
     if max_iterations is not None and step_count >= max_iterations:
         return {"cap": "iterations", "limit": max_iterations, "source": iter_src}
-    # Child count (safety.max_children, falling back to safety.max_agents).
+    # Child count (safety.max_children; the deprecated max_agents alias is
+    # honored as a fallback inside the resolver — W5.2).
     max_children, child_src = clamp_limit(
-        read_cap(settings, "max_children", None)
-        or read_cap(settings, "max_agents", _DEFAULT_MAX_CHILDREN),
+        resolver.resolve("children"),
         budgets.get("children"),
     )
     if max_children is not None:
         if child_count() >= max_children:
             return {"cap": "children", "limit": max_children, "source": child_src}
-    # Workspace bytes (module constant unless settings provide one).
+    # Workspace bytes (runtime default unless settings provide one).
     max_workspace_bytes, ws_src = clamp_limit(
-        read_cap(settings, "max_workspace_bytes", _DEFAULT_MAX_WORKSPACE_BYTES),
+        resolver.resolve("workspace_bytes"),
         budgets.get("workspace_bytes"),
     )
     if max_workspace_bytes is not None:
@@ -229,9 +313,9 @@ def cap_hit(
                 "limit": max_workspace_bytes,
                 "source": ws_src,
             }
-    # Message rate (module constant unless settings provide one).
+    # Message rate (disabled by default unless settings provide one).
     max_messages, msg_src = clamp_limit(
-        read_cap(settings, "max_messages_per_step", _DEFAULT_MAX_MESSAGES_PER_STEP),
+        resolver.resolve("messages_per_step"),
         budgets.get("messages_per_step"),
     )
     if max_messages is not None:
@@ -257,10 +341,9 @@ def caps_exceeded(
 ) -> Optional[str]:
     """Return the name of the first ceiling cap exceeded, else None.
 
-    Moved from ``Runtime._caps_watchdog``. Reads caps from *settings*
-    None-safely (safety.timeout_seconds / max_iterations / max_agents /
-    max_workspace_bytes / max_children / max_messages_per_step; Step 5 owns
-    full config), with the agent's working budgets min-clamped onto each
+    Moved from ``Runtime._caps_watchdog``. Resolves each cap ceiling through
+    the single :class:`ConfigResolver` (W5.1) — safety.<field> wins, then the
+    runtime default — with the agent's working budgets min-clamped onto each
     ceiling (G-01 — an agent budget can only tighten a limit). Tests force
     caps via a tiny settings object. Thin view over :func:`cap_hit`.
     """

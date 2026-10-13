@@ -388,3 +388,36 @@ def test_wired_bus_peek_fan_out(tmp_path):
         assert EventKind.child_settled in kinds
     finally:
         rt.stop()
+
+
+def test_caps_state_helper_exposes_watchdog_cursors(tmp_path):
+    """W4.5: caps_state() is a read-only view of the watchdog cursors.
+
+    After the watchdog runs (advancing the per-step message-rate cursor),
+    ``caps_state()`` reflects the live cursor; mutating the returned dict
+    does NOT affect the watchdog.
+    """
+    rt = make_runtime(settings=_settings(tmp_path, max_messages_per_step=3))
+    try:
+        handle = rt.spawn("do it", driver=ScriptedDriver("complete('done')"))
+        handle.await_()
+        agent_id = handle.id
+        topic = f"events:{agent_id}"
+
+        # Publish a few events, then run the watchdog (advances the cursor).
+        for i in range(3):
+            rt.event_bus.publish(topic, _marker(agent_id, i))
+        rt._caps_watchdog(agent_id, rt.engine, 1, time.monotonic())
+
+        # The helper sees the live cursor for this agent.
+        state = rt.caps_state()
+        assert agent_id in state
+        assert state[agent_id] >= 3
+
+        # Mutating the returned dict must not touch the live cursors.
+        state[agent_id] = 0
+        state["injected"] = 99
+        assert rt.caps_state()[agent_id] >= 3
+        assert "injected" not in rt.caps_state()
+    finally:
+        rt.stop()

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..data.models import Artifact, Event, EventKind
-from ..errors import ChannelError
+from ..errors import ArtifactNotFoundError, ChannelError
 
 
 # --------------------------------------------------------------------------- #
@@ -78,7 +78,11 @@ def _publish(ctx: ArtifactToolContext, headline: str, summary: str, report: Any)
 def _read_artifact(
     ctx: ArtifactToolContext, artifact_id: str, level: str = "summary"
 ) -> str:
-    """Progressive disclosure: headline -> summary -> report tiers."""
+    """Progressive disclosure: headline -> summary -> report tiers.
+
+    Accepted levels: ``headline``, ``summary``, ``report`` (the full body),
+    plus ``full`` and ``raw`` as aliases of ``report``.
+    """
     if ctx.store is None:
         raise RuntimeError("no artifact store wired into the tools layer")
     if level == "headline":
@@ -91,7 +95,8 @@ def _read_artifact(
             return report
         return json.dumps(report, ensure_ascii=False, sort_keys=True, default=str)
     raise ValueError(
-        f"unknown disclosure level {level!r}; expected headline|summary|report"
+        f"unknown disclosure level {level!r}; expected "
+        "headline|summary|report|full|raw"
     )
 
 
@@ -109,7 +114,10 @@ def _archive(ctx: ArtifactToolContext, artifact_id: str) -> str:
     root = getattr(ctx.store, "_root", None) or getattr(ctx.store, "root", None)
     if root is not None:
         return str(Path(root) / "artifacts" / f"{artifact_id}.json")
-    return artifact_id
+    raise ArtifactNotFoundError(
+        f"no on-disk path derivable for artifact {artifact_id!r} "
+        "(store exposes neither path_for nor a root)"
+    )
 
 
 def _list_artifacts(ctx: ArtifactToolContext) -> list[str]:
@@ -148,6 +156,55 @@ def _bind(ctx: ArtifactToolContext) -> dict[str, Callable[..., Any]]:
     }
 
 
+def _register_surface_entries() -> None:
+    """Register the artifact-tool surface entries (idempotent, W1.2).
+
+    ``read_artifact`` is tier CORE — the flagship read half the historical
+    prompt omitted (F1).
+    """
+    from ..framework.surface import SurfaceEntry, default_registry
+
+    default_registry.register(
+        SurfaceEntry(
+            name="publish",
+            fn=_publish,
+            doc="Persist a finding as a durable artifact.",
+            tier="core",
+            call="publish(headline, summary, report)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="read_artifact",
+            fn=_read_artifact,
+            doc=(
+                "Read an artifact (progressive disclosure: headline/summary/"
+                "report; full and raw are aliases of report)."
+            ),
+            tier="core",
+            call="read_artifact(artifact_id, level='summary')",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="archive",
+            fn=_archive,
+            doc="Copy an artifact into the durable archive.",
+            tier="core",
+            call="archive(artifact_id)",
+        )
+    )
+    default_registry.register(
+        SurfaceEntry(
+            name="list_artifacts",
+            fn=_list_artifacts,
+            doc="List the stored artifact ids.",
+            tier="core",
+            call="list_artifacts()",
+        )
+    )
+
+
 def register_artifact_tools(
     runtime: Any,
     store: Any,
@@ -155,32 +212,36 @@ def register_artifact_tools(
 ) -> None:
     """Install the artifact store tools as namespace callables on *runtime*.
 
-    Same mechanics as ``dhc.tooling.framework_tools.register_default_tools``: the
-    runtime's namespace builder (``_build_namespace``) is wrapped so each
-    agent's turn namespace gains the store tools bound to that agent. The
-    framework core is untouched: it keeps its slim base namespace; the store
-    tools are composed in here.
+    Same mechanics as ``dhc.tooling.framework_tools.register_default_tools``: W1.3
+    appends a builder to the runtime's ordered, public namespace-builder
+    chain (``runtime.register_namespace_builder``) so each agent's turn
+    namespace gains the store tools bound to that agent. The framework
+    core is untouched: it keeps its slim base namespace; the store tools
+    are composed in here.
 
     *store* is duck-typed (raw ``put(artifact)`` or adapter-style
     ``publish(h, s, r)`` plus the read tiers); *bus* is duck-typed
     (``publish(event)``) and is where the ``artifact_published`` event is
     emitted after each persist.
     """
-    original = getattr(runtime, "_build_namespace", None)
     names = set(getattr(runtime, "_installed_tool_names", ()))
     names.update(_ARTIFACT_TOOL_NAMES)
     runtime._installed_tool_names = names
 
-    def build(agent: Any) -> dict:
-        ns = original(agent) if original is not None else {}
-        ctx = ArtifactToolContext(agent_id=agent.id, store=store, bus=bus)
-        ns.update(_bind(ctx))
-        return ns
+    _register_surface_entries()
 
-    runtime._build_namespace = build  # type: ignore[method-assign]
+    def build(agent: Any) -> dict:
+        ctx = ArtifactToolContext(agent_id=agent.id, store=store, bus=bus)
+        return _bind(ctx)
+
+    runtime.register_namespace_builder(build, name="artifact_tools")
 
 
 __all__ = [
     "ArtifactToolContext",
     "register_artifact_tools",
 ]
+
+# The artifact-tool surface entries are registered at import time (W1.2):
+# the registry must be complete before any runtime is wired.
+_register_surface_entries()

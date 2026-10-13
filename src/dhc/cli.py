@@ -6,20 +6,21 @@ file holding the current requirement/context and a transcript file holding
 the conversation — and renders a banner plus the streamed responses. All chat
 semantics live in ``dhc.operator``.
 
-The CLI works without an API key: when ``--mock`` is passed (or no
-``OPENAI_API_KEY`` is configured) the deterministic default driver is used,
-so every requirement settles with a coded ``complete(requirement)`` action.
+The chat CLI always runs the deterministic default driver (``driver=None``)
+— it never calls an LLM (INFO-070) — so every requirement settles with a
+coded ``complete(requirement)`` action. ``--mock`` is accepted for
+quickstart parity but is a documented no-op; ``--model`` was removed (W6.4)
+because the chat CLI has no real driver to configure.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from .data.config import get_settings
+from .data.config import get_settings, load_config
 from .ui.operator import ChatSession, Operator
 from .framework.runtime import Runtime
 
@@ -50,18 +51,35 @@ def _append(path: Path, text: str) -> None:
         fh.write(text)
 
 
-def _banner(stream: object, mock: bool, model: str) -> None:
-    """Print the startup banner to *stream* (rich when available)."""
-    mode = "mock" if mock else f"model={model}"
+def _banner(stream: object) -> None:
+    """Print the startup banner to *stream* (rich when available).
+
+    The chat CLI always runs the deterministic driver (echo mode) — the
+    banner says so (F8 honesty: it used to print ``model=...`` from a
+    decorative ``--model`` flag that never reached a driver). The banner
+    lists every in-loop command with one-line help (W6.3), rendered from
+    :data:`ChatSession.COMMANDS`, the single source of truth for the chat
+    vocabulary, so the banner cannot drift from the dispatch.
+    """
+    command_lines = [f"  {cmd} — {help_}" for cmd, help_ in ChatSession.COMMANDS]
     try:
         from rich.console import Console
 
         console = Console(file=stream)
         console.rule("[bold cyan]dhc[/bold cyan]")
-        console.print(f"[dim]operator door open — {mode} — type !quit to exit[/dim]")
+        console.print(
+            "[dim]operator door open — echo mode (deterministic driver; "
+            "no LLM in dhc chat)[/dim]"
+        )
+        console.print("[dim]commands:[/dim]")
+        for line in command_lines:
+            console.print(f"[dim]{line}[/dim]")
     except Exception:  # noqa: BLE001 - rich is optional for the banner
         stream.write("dhc — operator door open\n")
-        stream.write(f"mode: {mode} — type !quit to exit\n")
+        stream.write("mode: echo (deterministic driver; no LLM in dhc chat)\n")
+        stream.write("commands:\n")
+        for line in command_lines:
+            stream.write(f"{line}\n")
         stream.flush()
 
 
@@ -86,12 +104,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mock",
         action="store_true",
-        help="use the deterministic mock driver (no API key needed)",
+        help="accepted for quickstart parity; the chat CLI always runs the "
+        "deterministic driver (no LLM in dhc chat)",
     )
+    # NOTE (W6.4): --model was removed — the chat CLI always runs the
+    # deterministic driver (driver=None), so a model name had no consumer
+    # beyond the banner text. The real driver's model is configured via
+    # llm.model in harness.json (or --model on the terminal entry point).
     parser.add_argument(
-        "--model",
+        "--config",
         default=None,
-        help="LLM model name (used by the real driver; ignored in mock mode)",
+        help="Path to harness.json (highest-precedence config layer; "
+        "see dhc.data.config.load_config)",
     )
     # NOTE (H-02): --timeout was removed — the chat CLI always runs the
     # deterministic driver (driver=None), so a per-call LLM timeout had no
@@ -121,11 +145,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _ensure_file(transcript_file)
 
     settings = get_settings()
-    has_key = bool(settings.openai_api_key or os.environ.get("OPENAI_API_KEY"))
-    mock = args.mock or not has_key
-    model = args.model or settings.openai_model
+    # --config: load the explicit harness.json as the highest-precedence
+    # config layer (XDG base -> explicit path) and install it on the
+    # settings so settings.provider / settings.config.safety reflect it
+    # (parity with the terminal entry point, W5.4).
+    if args.config is not None:
+        settings.config = load_config(args.config)
 
-    _banner(sys.stdout, mock, model)
+    # The chat CLI always runs the deterministic driver (driver=None) —
+    # it never calls an LLM (INFO-070). --mock is accepted for quickstart
+    # parity (README) but is a documented no-op; --model was removed (W6.4).
+    _banner(sys.stdout)
 
     runtime = Runtime(settings=settings)
     runtime.start()
@@ -133,6 +163,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         operator = Operator(runtime=runtime, stream=sys.stdout)
         if args.inspect is not None:
             view = operator.inspect(args.inspect)
+            if view.get("status") is None:
+                # F8 honesty: an unknown id is named loudly, not rendered
+                # as a blank "status: None" view.
+                known = len(getattr(runtime, "_agents", None) or {})
+                print(
+                    f"unknown agent id: {args.inspect} "
+                    f"({known} agents known)"
+                )
+                return 0
             print(f"inspect {args.inspect}")
             print(f"  status: {view.get('status')}")
             print(f"  result: {view.get('result')}")

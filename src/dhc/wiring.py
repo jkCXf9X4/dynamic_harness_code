@@ -35,6 +35,7 @@ other wiring-level attributes.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -58,6 +59,7 @@ from .llm.llm import ContextRotDetector
 from .errors import ChannelError, TurnError, TurnTimeoutError
 from .framework.event_stream import CompletionDispatcher, EventBus
 from .tooling.fabrication import fabrication_kit
+from .ui.checkpoint import CheckpointStore
 from .ui.operator import Operator
 from .framework.repl import ReplEngine
 from .framework.runtime import Runtime
@@ -197,12 +199,15 @@ def _extend_namespace(
     # from the tooling layer (decision 0014) — same namespace-wrapping
     # mechanics, separate module, so the framework core stays store-unaware.
     register_artifact_tools(runtime, store=store, bus=bus)
-    original = runtime._build_namespace
 
+    # W1.3: the wiring root's own additions (the driver factory names and
+    # the fabrication kit) are the LAST builder in the ordered, public
+    # chain — the same position the historical wrap chain gave them.
     def build(agent: Any) -> dict:
-        ns = original(agent)
-        ns["MockDriver"] = MockDriver
-        ns["driver_from_settings"] = driver_from_settings
+        ns: dict[str, Any] = {
+            "MockDriver": MockDriver,
+            "driver_from_settings": driver_from_settings,
+        }
         # IMP-001 Step 2: the fabrication kit (default __runner + decide +
         # context + helpers) is injected into every agent's namespace. The
         # kit is installable and testable WITHOUT the pump (Step 3 rewrites
@@ -222,15 +227,71 @@ def _extend_namespace(
         ns.update(kit)
         return ns
 
-    runtime._build_namespace = build  # type: ignore[method-assign]
+    runtime.register_namespace_builder(build, name="wiring_kit")
+
+
+class WiredRuntime(Runtime):
+    """A :class:`~dhc.framework.runtime.Runtime` with every wiring-level
+    decoration declared (W4.1).
+
+    :func:`build_runtime` attaches the real modules (ReplEngine, EventBus,
+    CompletionDispatcher, ArtifactStore, the communication channels, the
+    operator door, the rot detector, and the operator's default
+    :class:`~dhc.ui.checkpoint.CheckpointStore`) after construction. This
+    subclass declares each of those decorations as a typed class-level
+    annotation so the wired runtime is a typed, inspectable object: static
+    checkers and ``hasattr`` both see the full surface, and the core
+    :class:`Runtime` stays store/channel-unaware.
+
+    ``artifact_store`` is the public read surface (the
+    :class:`~dhc.tooling.StoreAdapter`). The historical
+    ``artifact_store_real`` name is kept as a deprecated read-only property
+    that forwards to ``artifact_store`` (the raw
+    :class:`~dhc.tooling.ArtifactStore` is no longer exposed directly).
+    """
+
+    # Post-construction decorations attached by build_runtime (W4.1):
+    # declared as annotations only — no assigned defaults, so a bare
+    # WiredRuntime() is a plain Runtime until build_runtime wires it.
+    messenger: Messenger
+    rooms: RoomManager
+    escalations: EscalationChannel
+    questions: OperatorQuestionChannel
+    dispatcher: CompletionDispatcher
+    boundary_log: BoundaryEventLog
+    bus: EventBus
+    artifact_store: StoreAdapter
+    operator: Operator
+    mock: bool
+    rot_detector: ContextRotDetector
+    repl_engine: ReplEngine
+    checkpoint_store: CheckpointStore
+
+    @property
+    def artifact_store_real(self) -> StoreAdapter:
+        """The artifact store (deprecated name).
+
+        .. deprecated::
+            Use :attr:`artifact_store` (the :class:`~dhc.tooling.StoreAdapter`)
+            instead. This property forwards to it and emits a
+            :class:`DeprecationWarning`; it is kept as a shim until the
+            remaining readers are migrated, then deleted in a later release.
+        """
+        warnings.warn(
+            "WiredRuntime.artifact_store_real is deprecated; use "
+            "WiredRuntime.artifact_store (the StoreAdapter) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.artifact_store
 
 
 def build_runtime(
     settings: Any = None,
     mock: bool = False,
     artifact_root: Any = None,
-) -> Runtime:
-    """Construct a fully-wired :class:`~dhc.runtime.Runtime`.
+) -> WiredRuntime:
+    """Construct a fully-wired :class:`WiredRuntime`.
 
     Wires the REAL modules: ReplEngine, EventBus (with BoundaryEventLog as
     the persist sink), CompletionDispatcher, ArtifactStore, and the
@@ -240,8 +301,12 @@ def build_runtime(
     ``runtime.questions``; the operator door as ``runtime.operator``; the
     dispatcher as ``runtime.dispatcher``; the boundary log as
     ``runtime.boundary_log``; the store adapter as ``runtime.artifact_store``
-    (raw store as ``runtime.artifact_store_real``) — wiring-level
-    decorations attached after construction, the core never reads them.
+    (the historical ``runtime.artifact_store_real`` name is a deprecated
+    property forwarding to it) — wiring-level decorations attached after
+    construction, the core never reads them. A default
+    operator :class:`~dhc.ui.checkpoint.CheckpointStore` is attached under
+    the artifact root as ``runtime.checkpoint_store`` (W6.1), so the
+    terminal's ``/resume`` works out of the box.
 
     The artifact store and channels are installed into the agent namespace as
     REPL tools (publish, read_artifact, archive, list_artifacts, room,
@@ -270,7 +335,7 @@ def build_runtime(
     dispatcher = CompletionDispatcher()
     store_adapter = StoreAdapter(store)
 
-    runtime = Runtime(
+    runtime = WiredRuntime(
         engine=None,  # wired below (needs the runtime for agent resolution)
         event_bus=_WiredBus(bus, dispatcher),
         settings=settings,
@@ -306,13 +371,17 @@ def build_runtime(
     # wiring-level decoration (adapter + raw store) — the core Runtime class
     # neither defines nor reads these attributes.
     runtime.artifact_store = store_adapter
-    runtime.artifact_store_real = store
     runtime.operator = Operator(runtime=runtime, question_channel=questions)
     runtime.mock = mock
     # INFO-021: activate the dormant context-rot detector — observe-only.
     # The per-agent fabrication kit forwards it to driver_from_settings so
     # LLMDriver.__call__'s existing per-block observation actually collects.
     runtime.rot_detector = ContextRotDetector()
+    # W6.1: the operator's resumability store (decision 0016) is attached by
+    # default under the artifact root, so the terminal's /resume works out
+    # of the box. CheckpointStore.__init__ mkdirs its root, so it must live
+    # under the runtime's workspace root (a tmp dir in tests, never CWD).
+    runtime.checkpoint_store = CheckpointStore(root / "checkpoints")
 
     _extend_namespace(
         runtime, bus, messenger, rooms, escalations, questions, store_adapter

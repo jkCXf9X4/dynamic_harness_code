@@ -17,7 +17,27 @@ import pytest
 from dhc.framework.agent import Agent
 from dhc.framework.runtime import Runtime
 from dhc.data.models import EventKind
-from dhc.errors import ChannelError
+from dhc.errors import ChannelError, UnknownAgentError
+from dhc.framework.surface import default_registry
+
+
+@pytest.fixture(autouse=True)
+def _restore_surface_registry():
+    """Snapshot/restore the process-wide surface registry (W1 isolation).
+
+    ``test_wired_send_reaches_events_tool_and_view`` builds a fully-wired
+    runtime, whose wiring registers channel/artifact/framework tools into
+    the process-wide :data:`default_registry`. Without a restore, that
+    mutation leaks into later tests in the same process — the golden-prompt
+    tests in ``tests/llm/test_prompt_assembly.py`` then see a registry that
+    no longer matches the pristine core surface, deterministically, in
+    default suite order. Snapshot the entries before each test and restore
+    them after, so the registry state is order-independent.
+    """
+    snapshot = dict(default_registry._entries)
+    yield
+    default_registry._entries.clear()
+    default_registry._entries.update(snapshot)
 
 
 def _register(runtime, agent_id, parent_id=None):
@@ -144,5 +164,32 @@ def test_wired_send_reaches_events_tool_and_view(tmp_path):
         assert [m.body for m in rt.messenger.inbox("a2")] == ["wired hello"]
         # Boundary record: one send, one "messaged" record (INFO-049).
         assert [r["kind"] for r in rt.boundary_log.read()] == ["messaged"]
+    finally:
+        rt.stop()
+
+
+def test_read_only_helpers_expose_registry_and_stop_flags():
+    """W4.5: the public read-only helpers replace direct private reads.
+
+    ``agents_snapshot()`` and ``is_stopped()`` let a test inspect the
+    registry and stop flags without reaching into ``_agents`` /
+    ``_stop_flags``.
+    """
+    rt = Runtime()
+    rt.start()
+    try:
+        _register(rt, "a1")
+        _register(rt, "a2")
+
+        # agents_snapshot() sees both registered agents (a copy).
+        snap = rt.agents_snapshot()
+        assert set(snap) == {"a1", "a2"}
+        assert snap["a1"] is rt.get("a1")
+
+        # is_stopped() is False for live agents, and raises for unknown ids.
+        assert rt.is_stopped("a1") is False
+        assert rt.is_stopped("a2") is False
+        with pytest.raises(UnknownAgentError):
+            rt.is_stopped("ghost")
     finally:
         rt.stop()

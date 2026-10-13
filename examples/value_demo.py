@@ -12,8 +12,9 @@ API key needed) through a complete agent session:
       -> runtime settles
 
 Then writes a structured value report to
-``.dynamic-harness/261006_230325_4a23/artifacts/value_demo_report.md``
-answering "what value does dhc provide during agent work?":
+``<artifact_root>/value_demo_report.md`` (the artifact root is a fresh
+per-run temp dir, so the demo runs on any machine) answering "what value
+does dhc provide during agent work?":
 
   (a) one coded action replaces N tool-call turns
   (b) progressive disclosure (headline -> summary -> report) saves context
@@ -36,8 +37,13 @@ import tempfile
 import time
 from pathlib import Path
 
-# Allow running from a source checkout without installation.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Allow running from a source checkout without installation. The package
+# lives under src/ (src layout), so src/ is on the path for ``dhc``; the repo
+# root is on the path so ``examples`` (a namespace package) resolves for the
+# shared mock-script helper.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+sys.path.insert(0, str(_REPO_ROOT))
 
 from dhc import (  # noqa: E402
     CompletionLog,
@@ -46,68 +52,24 @@ from dhc import (  # noqa: E402
     driver_from_settings,
 )
 from dhc.data.models import Completion, Result  # noqa: E402
-
-#: The report destination (mission requirement).
-REPORT_PATH = Path(
-    "/home/eriro/pwa/2_work/dynamic_harness_code/.dynamic-harness"
-    "/261006_230325_4a23/artifacts/value_demo_report.md"
+from examples._mock_scripts import (  # noqa: E402
+    CHILD_FAIL,
+    CHILD_REPORT,
+    build_child_ok,
+    build_root_script,
 )
 
-#: Child report bodies (deliberately long: the progressive-disclosure demo
-#: measures how much of this the parent's context never sees).
-CHILD_REPORT = (
-    "The AI agent market is projected to grow from $5.1B in 2024 to $47.1B "
-    "by 2030, a compound annual growth rate of 44.5%. Enterprise adoption is "
-    "driven by customer support automation, code generation, and knowledge "
-    "management. The competitive landscape is consolidating around three "
-    "platform vendors, with open-source alternatives capturing 22% of "
-    "developer mindshare. Key risks include model hallucination in "
-    "high-stakes domains, regulatory uncertainty in the EU AI Act, and "
-    "compute cost volatility. Recommended posture: invest in evaluation "
-    "tooling and human-in-the-loop review before broad deployment."
-)
+#: The report destination, derived from the mock session's artifact root in
+#: :func:`main` (a fresh per-run temp dir — the demo must run on any machine,
+#: so no path is hardcoded here).
+REPORT_PATH: Path | None = None
 
-#: A child that succeeds: publish an artifact, then complete.
-#: The report body is inlined via repr() so the block is self-contained.
-CHILD_OK = (
-    "art = publish('child finding', 'child summary', " + repr(CHILD_REPORT) + ")\n"
-    "result = complete('child done', artifacts=[art.id])\n"
-)
-
-#: A child that fails: crash containment demo (INFO-005).
-CHILD_FAIL = (
-    "result = fail('risk data source unavailable; requirement unreachable')\n"
-)
+#: A child that succeeds: publish an artifact, then complete. The report
+#: body is the long CHILD_REPORT (progressive-disclosure demo).
+CHILD_OK = build_child_ok(CHILD_REPORT)
 
 #: The root's two coded actions: fan out, then aggregate and settle.
-#: Child code is inlined via repr() so the blocks are self-contained (the
-#: agent's REPL namespace only holds the in-code surface, not demo globals).
-ROOT_SCRIPT = [
-    # Turn 1: publish the plan, spawn 3 children (fan-out, INFO-009).
-    (
-        "plan = publish('research plan', 'fan out to 3 children', "
-        "{'plan': 'market research on AI agents'})\n"
-        "c1 = spawn('research market size', acceptance=('done',), "
-        "driver=MockDriver.single(" + repr(CHILD_OK) + "))\n"
-        "c2 = spawn('research competitors', acceptance=('done',), "
-        "driver=MockDriver.single(" + repr(CHILD_OK) + "))\n"
-        "c3 = spawn('research risks', acceptance=('done',), "
-        "driver=MockDriver.single(" + repr(CHILD_FAIL) + "))\n"
-        "result = complete('spawned 3 children', artifacts=[plan.id])\n"
-    ),
-    # Turn 2: await every child (ensure-terminal), aggregate the artifact ids
-    # of the survivors, publish the final artifact, complete.
-    (
-        "ids = []\n"
-        "for h in (c1, c2, c3):\n"
-        "    comp = await_(h)\n"
-        "    if comp.status.value == 'completed':\n"
-        "        ids.extend(comp.artifact_ids)\n"
-        "final = publish('final report', 'aggregated findings', "
-        "{'artifact_ids': ids})\n"
-        "result = complete('root done', artifacts=[final.id])\n"
-    ),
-]
+ROOT_SCRIPT = build_root_script(CHILD_OK)
 
 
 def _count_tool_calls_traditional() -> int:
@@ -125,8 +87,8 @@ def _count_tool_calls_traditional() -> int:
     )
 
 
-def _run_mock_session() -> dict:
-    """Run the end-to-end mock session; return the evidence dict."""
+def _run_mock_session() -> tuple[dict, Path]:
+    """Run the end-to-end mock session; return (evidence dict, artifact root)."""
     tmp = tempfile.mkdtemp(prefix="dhc-demo-")
     rt = build_runtime(mock=True, artifact_root=tmp)
     rt.start()
@@ -161,8 +123,8 @@ def _run_mock_session() -> dict:
         "children": child_states,
         "turns": 2 + len(children),  # root 2 turns + 1 per child
         "code_blocks": 2 + len(children),
-        "artifacts": rt.artifact_store_real.list_ids(),
-        "store_count": rt.artifact_store_real.count(),
+        "artifacts": rt.artifact_store.list_ids(),
+        "store_count": rt.artifact_store.count(),
         "boundary": {
             "spawned": len(rt.boundary_log.read(kind="spawned")),
             "settled": len(rt.boundary_log.read(kind="settled")),
@@ -174,7 +136,7 @@ def _run_mock_session() -> dict:
         "summary_chars": len("child summary"),
     }
     rt.stop()
-    return evidence
+    return evidence, Path(tmp)
 
 
 def _demo_at_most_once() -> str:
@@ -337,7 +299,11 @@ def _build_report(evidence: dict, real_llm: dict | None) -> str:
 
 def main() -> int:
     """Run the demo; return the process exit code."""
-    evidence = _run_mock_session()
+    global REPORT_PATH
+    evidence, artifact_root = _run_mock_session()
+    # The report lives under the session's artifact root (a fresh per-run
+    # temp dir) so the demo runs on any machine — no hardcoded paths.
+    REPORT_PATH = artifact_root / "value_demo_report.md"
 
     real_llm = None
     if os.environ.get("OPENAI_API_KEY"):

@@ -18,7 +18,7 @@ status: current
 
 - **`data/models.py`**: `Artifact`, `Result`, `Event`, `Completion`, `ToolOutput`, `Room`, lifecycle states.
 - **`errors.py`**: the `DhcError` hierarchy.
-- **`data/config.py`**: `Settings` (env + `.env`), `get_settings()`.
+- **`data/config.py`**: `HarnessConfig` (canonical, layered `harness.json`), `Settings` (read-only view over it), `load_config`, `load_settings`, `get_settings`, `merge_api_key` (W5.1).
 
 - **`framework/runtime.py`**: `Runtime` — spawn/await/poll/cancel/status/result/send, parent liveness, worker loop.
   - Orchestrator plus re-export facade since the module split (`IMD-001`).
@@ -41,7 +41,7 @@ status: current
     - Bare `Runtime()` is the CLI's shape (`cli.py:130`).
   - Owns the yield vocabulary (`Await`/`Poll`/`Sleep`), `install_runner`/`service_await`/`service_sleep`/`step_timeout`/`supports_pump`, the parked-time accumulator (`PD-001`).
 
-- **`framework/caps.py`**: ceiling-caps watchdog predicate plus the five ceiling-cap defaults (`IMD-001`).
+- **`framework/caps.py`**: ceiling-caps watchdog predicate plus the five ceiling-cap defaults (`IMD-001`); the `ALIASES` deprecation table (W5.2).
   - Wall-clock branch carries the parked-time credit (`PD-001`) on the monotonic base (`AD-007`).
 - **`framework/integrity.py`**: best-effort `ensure_fabrication` re-seed calls (`IMD-001`, `AD-004`).
 
@@ -75,14 +75,15 @@ status: current
 - **`tooling/fabrication.py`**: the default agent.
   - The fabrication kit a workspace is born with: default `__runner__`, `decide`, context, helpers.
   - Handed in via `Runtime(kit_factory=...)` (`AD-011`).
-- **`tooling/framework_tools.py`**: framework-surface tools: `list_tools`, `events`.
+- **`tooling/framework_tools.py`**: framework-surface tools: `list_tools`, `events`, `ack`, `answers`, `gather` (W3.5/W3.6/W3.8).
   - `events` moved out of the framework (`AD-010`).
+  - Re-asserts the W3 tier moves: `Await`/`Poll`/`Sleep` core (with call forms), `messenger` advanced.
 - **`tooling/artifact_store.py`**: content-addressed `ArtifactStore`, `BoundaryEventLog` (`INFO-049`).
   - Composed tooling (`AD-008`).
 - **`tooling/artifact_tools.py`**: the store's REPL tools: `publish`, `read_artifact`, `archive`, `list_artifacts`.
 - **`tooling/channels.py`**: `Messenger`, `RoomManager`, `EscalationChannel`, `OperatorQuestionChannel`.
   - Communication policies over the core `send` primitive (`AD-009`).
-- **`tooling/channel_tools.py`**: the channels' REPL tools: `room`, `messenger`, `escalate`, `ask_operator`, `post`, `channel_read`.
+- **`tooling/channel_tools.py`**: the channels' REPL tools: `room`, `messenger`, `escalate`, `ask_operator`, `post`, `room_messages`, `channel_read` (deprecated advanced alias of `room_messages`).
 - **`ui/operator.py`**: root door, chat loop, mid-turn steering, operator questions.
 - **`ui/state.py`**: the operator's review files: tree, stats, events (`AD-010`).
 - **`ui/checkpoint.py`**: the operator's resumability store, surfaced via `/resume` (`PD-002`).

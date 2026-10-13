@@ -36,6 +36,7 @@ primitive on the agent itself: :meth:`Agent.send` delegates to
 
 from __future__ import annotations
 
+import difflib
 import subprocess
 import time
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
@@ -46,6 +47,10 @@ from ..data.models import (
     ToolOutput,
     is_terminal,
 )
+
+# The only keyword pass-throughs accepted by Agent.spawn (W3.9). Anything
+# else is a caller typo and must fail loudly with a did-you-mean hint.
+_SPAWN_PASS_THROUGH = frozenset({"driver", "namespace"})
 
 
 class ToolResult(ToolOutput):
@@ -211,13 +216,24 @@ class Agent:
 
         *on_done* is registered as a completion callback on the parent's
         stream: it runs once, when the child settles — success or failure
-        alike (INFO-033). Extra keyword arguments (driver, namespace, ...)
-        are forwarded to the runtime.
+        alike (INFO-033). The only accepted keyword pass-throughs are
+        *driver* and *namespace*; any other keyword raises ``TypeError``
+        with a did-you-mean suggestion (W3.9 — a typo like
+        ``namespce=`` must fail loudly, not be swallowed).
 
         The handle is the join surface (await/poll/cancel/status/result);
         the raw child Agent never crosses into the parent's workspace (the
         REPL boundary contract — see :class:`WorkspaceAgent`).
         """
+        for key in kwargs:
+            if key not in _SPAWN_PASS_THROUGH:
+                match = difflib.get_close_matches(key, _SPAWN_PASS_THROUGH, n=1)
+                hint = (
+                    f" (did you mean {match[0]!r}?)"
+                    if match
+                    else f" (accepted keyword pass-throughs: {', '.join(repr(k) for k in sorted(_SPAWN_PASS_THROUGH))})"
+                )
+                raise TypeError(f"spawn() got unexpected keyword {key!r}{hint}")
         if self._runtime is None:
             raise RuntimeError("agent is not attached to a runtime")
         # Runtime.spawn already registered the child on this agent's
@@ -227,7 +243,7 @@ class Agent:
             acceptance=acceptance,
             parent_id=self.id,
             on_done=on_done,
-            _agent_callback=True,
+            agent_callback=True,
             **kwargs,
         )
 
@@ -261,8 +277,15 @@ class Agent:
         self._last_result = result
         return result
 
-    def cancel(self, reason: str = "cancelled") -> Result:
-        """Settle this agent as cancelled with *reason*."""
+    def record_result(self, reason: str = "cancelled") -> Result:
+        """Record a not-ok last result with *reason* (does NOT cancel).
+
+        Named ``record_result`` (not ``cancel``) because it only records a
+        not-ok result — the pump settles the agent as *failed* with that
+        reason. The REAL cancel is :meth:`AgentHandle.cancel` (which
+        delegates to ``Runtime.cancel`` and settles as *cancelled*). A
+        method named ``cancel`` that does not cancel is a trap (F10).
+        """
         result = Result(done=True, ok=False, reason=reason)
         self._last_result = result
         return result
@@ -374,7 +397,7 @@ AGENT_SURFACE: frozenset[str] = frozenset(
         "send",
         "complete",
         "fail",
-        "cancel",
+        "record_result",
         # queries
         "status",
         "result",
@@ -418,7 +441,7 @@ class AgentSurface(Protocol):
 
     def fail(self, reason: str) -> Result: ...
 
-    def cancel(self, reason: str = "cancelled") -> Result: ...
+    def record_result(self, reason: str = "cancelled") -> Result: ...
 
     def status(self) -> Result: ...
 
@@ -550,8 +573,8 @@ class WorkspaceAgent:
     def fail(self, reason: str) -> Result:
         return self._agent.fail(reason)
 
-    def cancel(self, reason: str = "cancelled") -> Result:
-        return self._agent.cancel(reason)
+    def record_result(self, reason: str = "cancelled") -> Result:
+        return self._agent.record_result(reason)
 
     def status(self) -> Result:
         return self._agent.status()

@@ -162,3 +162,56 @@ Two parallel configuration systems coexist: the legacy `Settings` dataclass driv
 ## 9. Bottom line
 
 dhc is one good 3-line API wearing four coats. The kernel — `build_runtime` → `spawn` → `await_`, and `spawn` → `await_` → `read_artifact` — is simple, sound, and demonstrably testable. Every problem found in this review lives in the layers added around that kernel: a prompt layer that documents APIs that don't exist while omitting the one that does, an agent surface assembled from four sites with three vocabularies, an embedder surface whose composition is done by monkey-patching privates, and an onboarding path that advertises an LLM and delivers an echo. None of these are architectural failures — the invariants are right — but they are exactly the kind of friction that decides whether an agent framework is adopted or abandoned. The P0 list alone would transform first-contact quality; P1 would halve the concept count.
+
+---
+
+# Remediation status (2026-10)
+
+> Appended after the remediation waves landed. Everything above this
+> marker is the original review, unchanged — the historical record.
+> Per-finding and per-wave status below, each with a one-line evidence
+> pointer. The wave plan is `docs/interface-fix-plan.md`; the breakdown
+> summary is `docs/breakdown/05-operation/interface-remediation-waves.md`
+> (INFO-073).
+
+## Findings F1–F10
+
+| # | Finding | Status | Evidence |
+|---|---------|--------|----------|
+| F1 | Prompt/API vocabulary drift | **Fixed** (W0, W1) | one prompt (`src/dhc/llm/agent_system_prompt.txt`), API section generated from the registry via `prompt_section()`; conformance test `tests/llm/test_prompt_conformance.py` (5 tests) |
+| F2 | No single source of truth for the namespace | **Fixed** (W1) | `src/dhc/framework/surface.py` — 47 entries (29 core / 3 advanced / 15 internal); `docs/agent-api.md` generated from it by `tools/generate_agent_api.py`, freshness test `tests/docs/test_agent_api_docs.py` |
+| F3 | `messenger.read` unusable — `Message` has no id | **Fixed** (W3) | `Message.id` (`src/dhc/data/models.py:316`); `answers(question_id)` reads by id |
+| F4 | Quick start is an echo bot; README claims false; dead links | **Fixed** (W2, W7) | README quick start rewritten (≤14 concepts, links resolve); `docs/quickstart.md` executed in CI by `tests/docs/test_quickstart_docs.py` |
+| F5 | Flagship demo crashes off the author's machine | **Fixed** (W2) | `examples/value_demo.py` portable; `tests/test_value_demo_clean.py` runs it from a clean cwd |
+| F6 | 4 ways to await, 2 to send, 3 room names, 3 settles | **Fixed** (W3, W1) | `await_`/`gather` core; `send` the core verb, `messenger` advanced facade; `room_name` canonical; one settle path (`complete`/`fail`) |
+| F7 | `complete(artifacts=...)` ids-only; magic strings; silent aliases | **Fixed** (W3) | artifact coercion (objects or ids); loud errors on unknown ids/rooms; `channel_read` a deprecated alias with `DeprecationWarning` (`src/dhc/tooling/channel_tools.py:141`) |
+| F8 | Silent no-ops (`!steer`, `/resume`, unknown room, archive fallback) | **Fixed** (W6) | `steer()` returns real delivery status (`src/dhc/ui/operator.py:177`); default `CheckpointStore` so `/resume` works; unknown-id and unknown-room raise loud errors |
+| F9 | Config split-brain | **Fixed** (W5) | `HarnessConfig` canonical, `Settings` a read-only view (`src/dhc/data/config.py`); `ALIASES` + `DeprecationWarning` (`src/dhc/framework/caps.py:139`); `harness.json.example` generated (`tools/generate_harness_example.py`); `--config` flag |
+| F10 | 13 undeclared attributes; monkey-patched privates | **Fixed** (W4) | typed `WiredRuntime` (`src/dhc/wiring.py:233`); `UnknownAgentError` (`src/dhc/errors.py:41`); public helpers `agents_snapshot`/`is_stopped`/`caps_state` (`src/dhc/framework/runtime.py:774-799`) |
+
+## Root causes (§7)
+
+- #1 (addition without consolidation) — addressed by the tier system
+  (core/advanced/internal) and the registry as single source; the
+  deletion wave for tiered-out names remains future work per §12.3.
+- #2 (no drift guard) — addressed: conformance test (prompt↔registry),
+  freshness test (docs↔registry), executed tutorial (docs↔code).
+- #3 (config accretion) — addressed (W5).
+- #4 (docs written for auditors, not users) — addressed (W7): a
+  quickstart that CI executes, a generated API reference, a README
+  quick start that forces ≤14 concepts.
+
+## Accepted deviations
+
+- `max_turn_seconds` stays a distinct per-step timeout (W5, deliberate):
+  it is the step budget; `llm.call_timeout_seconds` is the LLM call
+  timeout. Two different budgets, both real.
+- `runtime.artifact_store_real` is deprecated, forwarding to
+  `runtime.artifact_store` (the `StoreAdapter`) — removal deferred to
+  the §12.3 deletion wave.
+- `run_block` no longer takes a `timeout` parameter (planned W4.4,
+  resolved in the W7 close-out): the param was an unenforced lie; the
+  outer step timeout is the only bound. Both `ReplEngine.run_block`
+  (`src/dhc/framework/repl.py:238`) and the fabrication kit's wrapper
+  (`src/dhc/tooling/fabrication.py:236`) are clean — no caller passes
+  a timeout.

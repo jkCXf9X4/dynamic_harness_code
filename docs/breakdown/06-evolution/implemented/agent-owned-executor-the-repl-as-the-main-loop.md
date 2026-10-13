@@ -107,7 +107,9 @@ its own workspace.
 
 - **Op vocabulary is split by cost.**
   - Bounded, synchronous operations are direct workspace calls.
-  - Direct calls: `run_block(code)`, `inbox.drain`, `messenger.send`, guardrail/budget edits.
+  - Direct calls: `run_block(agent_id, code)`, `inbox.drain`, `send(recipient_id, body)`, guardrail/budget edits.
+  - `run_block` takes no timeout — a nested timeout would be unenforced; the outer step timeout is the only bound.
+  - `messenger` is an advanced facade (prefer the core `send` verb).
   - Indefinite or off-thread operations are `yield` requests serviced by the pump.
   - Yield requests: `yield Await(handle)`, `yield Poll(handle)`, `yield Sleep(t)`, completion wakeups.
   - A parent can `yield Await(child)` **without consuming step budget**.

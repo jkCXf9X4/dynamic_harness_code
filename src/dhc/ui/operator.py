@@ -174,7 +174,7 @@ class Operator:
 
     # -- mid-turn steering (INFO-022) ---------------------------------------
 
-    def steer(self, agent_id: str, message: str) -> None:
+    def steer(self, agent_id: str, message: str) -> bool:
         """Inject *message* into a running agent's context (mid-turn steering).
 
         Delivery rides the framework's directed-message primitive
@@ -184,20 +184,26 @@ class Operator:
         (``send(sender_id, recipient_id, body)``), else a documented no-op
         recorded on :attr:`undelivered_steers` — the operator never raises
         on steering.
+
+        Returns ``True`` when the message was actually delivered (via the
+        runtime or the messenger) and ``False`` when it was only recorded
+        as undelivered — callers must not report a no-op as a success
+        (F8: ``!steer`` used to print "steered <id>" either way).
         """
         send = getattr(self.runtime, "send", None)
         if callable(send):
             try:
                 send("operator", agent_id, message)
-                return
+                return True
             except Exception:  # noqa: BLE001 - steering never raises
                 pass
         if self.messenger is not None:
             self.messenger.send(
                 sender_id="operator", recipient_id=agent_id, body=message
             )
-            return
+            return True
         self.undelivered_steers.append((agent_id, message))
+        return False
 
     # -- read-only inspection (D2) ------------------------------------------
 
@@ -297,11 +303,25 @@ class ChatSession:
 
     * ``!quit`` — exit the loop.
     * ``!steer <agent_id> <msg>`` — mid-turn steering via ``operator.steer``.
+    * ``!inspect <agent_id>`` — read-only workspace view via ``operator.inspect``.
     * anything else — a new requirement run through ``operator.run(...)``.
+
+    The in-loop commands are advertised in :attr:`COMMANDS` (the CLI banner
+    renders them, W6.3) so the operator never has to guess the vocabulary.
 
     This is the interactive surface the CLI drives; tests inject a scripted
     ``input_fn`` and a fake output stream.
     """
+
+    #: The in-loop commands, in banner order: (command, one-line help).
+    #: Single source of truth for the chat banner (W6.3) — the CLI renders
+    #: these lines verbatim, so the banner can never drift from the
+    #: dispatch in :meth:`start_one`.
+    COMMANDS: tuple[tuple[str, str], ...] = (
+        ("!quit", "exit the chat"),
+        ("!steer <agent_id> <message>", "steer a running agent mid-turn"),
+        ("!inspect <agent_id>", "read-only workspace view of an agent"),
+    )
 
     def __init__(
         self,
@@ -318,6 +338,10 @@ class ChatSession:
         #: Optional sink receiving each settled result's text (used by the
         #: CLI to mirror responses into the transcript file).
         self.on_result = on_result
+        #: Whether the echo-mode banner has been printed yet (printed once,
+        #: on the first requirement line, when the DefaultDriver fallback is
+        #: in use — i.e. ``driver is None``).
+        self._echo_banner_shown = False
 
     def start(self) -> None:
         """Run the chat loop until ``!quit`` (or the input is exhausted)."""
@@ -342,8 +366,15 @@ class ChatSession:
                 self.output_stream.flush()
                 return True
             _, agent_id, message = parts
-            self.operator.steer(agent_id, message)
-            self.output_stream.write(f"steered {agent_id}\n")
+            delivered = self.operator.steer(agent_id, message)
+            if delivered:
+                self.output_stream.write(f"steered {agent_id}\n")
+            else:
+                # F8 honesty: the message was only recorded on the
+                # operator (no messenger wired) — say so, loudly.
+                self.output_stream.write(
+                    f"steer NOT delivered to {agent_id} (no messenger wired)\n"
+                )
             self.output_stream.flush()
             return True
         if line.startswith("!inspect "):
@@ -354,6 +385,17 @@ class ChatSession:
                 return True
             agent_id = parts[1].strip()
             view = self.operator.inspect(agent_id)
+            if view.get("status") is None:
+                # F8 honesty: an unknown id must be named, not rendered as
+                # a blank "status: None" view.
+                known = len(
+                    getattr(self.operator.runtime, "_agents", None) or {}
+                )
+                self.output_stream.write(
+                    f"unknown agent id: {agent_id} ({known} agents known)\n"
+                )
+                self.output_stream.flush()
+                return True
             self.output_stream.write(f"inspect {agent_id}\n")
             self.output_stream.write(f"  status: {view.get('status')}\n")
             self.output_stream.write(f"  result: {view.get('result')}\n")
@@ -363,6 +405,17 @@ class ChatSession:
             )
             self.output_stream.flush()
             return True
+        if not self._echo_banner_shown and self.driver is None:
+            # Echo honesty (decision D3): the DefaultDriver fallback echoes
+            # the requirement back — say so once, and point at the real-LLM
+            # entry point. The two-entry-point split is a recorded design
+            # decision (INFO-070); dhc chat never calls an LLM.
+            self.output_stream.write(
+                'echo mode: no LLM driver wired — set OPENAI_API_KEY and use '
+                '"python3 -m dhc.ui.terminal" for the real driver\n'
+            )
+            self.output_stream.flush()
+            self._echo_banner_shown = True
         result = self.operator.run(line, driver=self.driver)
         text = result.value if result.ok else result.reason
         self.output_stream.write(f"{text}\n")

@@ -36,3 +36,14 @@ class ChannelError(DhcError):
 
 class ConfigError(DhcError):
     """Invalid or missing configuration."""
+
+
+class UnknownAgentError(DhcError):
+    """An agent id was referenced that the runtime does not know.
+
+    Raised by the runtime's supervision paths (``poll``/``await_``/
+    ``cancel``/``result``/``get``/``children_of``/``is_settled``) instead of
+    a bare ``KeyError``: the message names the offending id and how many
+    agents the runtime actually knows, so a typo or a stale id fails loudly
+    and diagnosably (F10).
+    """

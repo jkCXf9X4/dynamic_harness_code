@@ -4,7 +4,7 @@
 # The installed skill bundles are reference material, not breakdown nodes.
 # Runtime/venv directories are not breakdown state and would otherwise trip
 # the leaf front-matter checks (generated artifacts, vendored docs).
-exclude_dirs = [".agents", ".dhc", ".dynamic-harness", ".venv", ".pytest_cache", "src", "tests", "examples"]
+exclude_dirs = [".agents", ".dhc", ".dynamic-harness", ".venv", ".pytest_cache", "src", "tests", "examples", "docs"]
 # The breakdown root is the repo root itself: record `artifacts:` resolve
 # against it (src/, tests/, examples/ live here, not in a parent).
 repo_root = "."

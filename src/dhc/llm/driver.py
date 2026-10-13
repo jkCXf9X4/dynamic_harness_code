@@ -27,24 +27,39 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from ..data.config import get_settings, merge_api_key
+from ..framework.surface import default_registry
 from .llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
-#: The in-code surface action blocks may call (documented in the prompt).
-_SURFACE_DOC = (
-    "Available in the namespace: agent, publish(headline, summary, report), "
-    "spawn(requirement, acceptance=(), driver=None, on_done=None), "
-    "complete(headline, artifacts=()), fail(reason), cancel(reason), "
-    "status(), result(), tool(callable, *args), bash(cmd), "
-    "send(recipient_id, body), room(name), "
-    "await_(handle), poll(handle), children_of(handle), "
-    "messenger.send(recipient_id, body), escalate(requirement, reason), "
-    "ask_operator(question)."
+#: The doctrine prompt (W1.5, decision D1): the hand-written prose —
+#: lifecycle, mission, guard rails — loaded from the package data file.
+#: The API section is NOT in it: that part is generated from the surface
+#: registry (see :func:`default_build_prompt`), so the doctrine can never
+#: drift from the code. Falls back to an inline constant if the file is
+#: missing (e.g. zipped installs).
+_DOCTRINE_FALLBACK = (
+    "You are the action generator for a recursive agent runtime. "
+    "Write ONE Python block — the next action — that makes progress "
+    "on the agent's requirement. The block runs against the agent's "
+    "persistent REPL, so state persists between turns. End the block "
+    "by calling complete(...) when the requirement is satisfied, or "
+    "fail(reason) when it cannot be. Respond with ONLY the Python "
+    "code, no prose."
 )
+
+
+def _load_doctrine_prompt() -> str:
+    """Load the doctrine prompt from the package data file."""
+    path = Path(__file__).parent / "agent_system_prompt.txt"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return _DOCTRINE_FALLBACK
 
 #: The default mock script: publish one artifact, then complete.
 DEFAULT_SCRIPT: list[str] = [
@@ -74,18 +89,24 @@ def _workspace_context(runtime: Any, agent_id: str) -> Optional[Any]:
     return ctx
 
 
-#: The default prompt assembly (G-02): the byte-identical extraction of
-#: the historical ``LLMDriver._build_prompt`` template. The kit installs this
-#: as the ``build_prompt`` workspace citizen; an agent that replaces it
-#: changes the prompt the LLM receives (the driver resolves the override
-#: through the same workspace-state seam as ``state["_driver"]``).
+#: The default prompt assembly (G-02 + W1.4/W1.5): the doctrine prompt
+#: (prose, from ``agent_system_prompt.txt``) + the registry-generated API
+#: section + the per-agent state. The kit installs this as the
+#: ``build_prompt`` workspace citizen; an agent that replaces it changes
+#: the prompt the LLM receives (the driver resolves the override through
+#: the same workspace-state seam as ``state["_driver"]``).
 def default_build_prompt(
     agent: Any,
     system_prompt: Optional[str] = None,
     recent_context: str = "",
 ) -> str:
-    """Assemble the default prompt for *agent* (byte-identical to the
-    historical ``LLMDriver._build_prompt``).
+    """Assemble the default prompt for *agent*.
+
+    Composition (decision D1): the doctrine prompt (hand-written prose —
+    lifecycle, mission, guard rails) as the base, the API section
+    GENERATED from the surface registry (``registry.prompt_section()`` —
+    the single source of truth, so the prompt can never drift from the
+    wired namespace), then the per-agent state.
 
     *system_prompt* is the driver's optional extra guidance (prepended when
     set); *recent_context* is the pre-rendered recent-events block (appended
@@ -95,16 +116,8 @@ def default_build_prompt(
     parts: list[str] = []
     if system_prompt:
         parts.append(system_prompt)
-    parts.append(
-        "You are the action generator for a recursive agent runtime. "
-        "Write ONE Python block — the next action — that makes progress "
-        "on the agent's requirement. The block runs against the agent's "
-        "persistent REPL, so state persists between turns. End the block "
-        "by calling complete(...) when the requirement is satisfied, or "
-        "fail(reason) when it cannot be. Respond with ONLY the Python "
-        "code, no prose."
-    )
-    parts.append(_SURFACE_DOC)
+    parts.append(_load_doctrine_prompt().rstrip())
+    parts.append(default_registry.prompt_section())
     parts.append(f"Requirement: {agent.requirement}")
     if agent.acceptance:
         parts.append(f"Acceptance criteria: {list(agent.acceptance)}")

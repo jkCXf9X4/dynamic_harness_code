@@ -96,6 +96,11 @@ from .framework.repl import ReplEngine
 from .framework.runtime import Runtime
 from .wiring import build_runtime
 
+# W4.2: the public namespace-composition entry point (W1.3) — the only
+# composition path for adding names to agent REPL namespaces. Exposed at
+# package level so embedders can compose without reaching into Runtime.
+register_namespace_builder = Runtime.register_namespace_builder
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -146,6 +151,7 @@ __all__ = [
     "ReplEngine",
     # runtime
     "Runtime",
+    "register_namespace_builder",
     # llm
     "LLMClient",
     "MockLLM",

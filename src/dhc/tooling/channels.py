@@ -39,8 +39,14 @@ def _new_id() -> str:
 
 
 def _to_message(event: Event) -> Message:
-    """Rebuild the tool-facing :class:`Message` from a message event."""
+    """Rebuild the tool-facing :class:`Message` from a message event.
+
+    Copies the event's ``message_id`` into ``Message.id`` (W3.3) so the
+    read-state API round-trips from the inbox's own output:
+    ``inbox()`` → ``read(m.id)``.
+    """
     return Message(
+        id=str(event.payload.get("message_id") or _new_id()),
         sender_id=str(event.payload.get("sender_id", "")),
         recipient_id=event.agent_id,
         body=str(event.payload.get("body", "")),
@@ -185,10 +191,17 @@ class RoomManager:
         return message
 
     def messages(self, room_name: str) -> list[Message]:
-        """Return the room's traffic in post order (empty for unknown rooms)."""
+        """Return the room's traffic in post order.
+
+        Raises ``ChannelError`` naming the room when the room is unknown
+        (W3.10) — a read of a room that does not exist is a loud failure,
+        not an empty list.
+        """
         with self._lock:
             room = self._rooms.get(room_name)
-            return list(room.messages) if room is not None else []
+            if room is None:
+                raise ChannelError(f"unknown room {room_name!r}")
+            return list(room.messages)
 
     def members(self, room_name: str) -> list[str]:
         """Return the room's member ids (empty for unknown rooms)."""

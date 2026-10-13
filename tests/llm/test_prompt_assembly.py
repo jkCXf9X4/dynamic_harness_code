@@ -2,10 +2,12 @@
 
 Covers the roadmap item's four acceptance criteria:
 
-1. ``build_prompt`` is a kit citizen installed in the workspace; the default
-   reproduces ``LLMDriver._build_prompt`` byte-identically (golden test —
-   the expected string below was captured from the pristine driver BEFORE
-   any refactoring, so the refactor cannot drift).
+1. ``build_prompt`` is a kit citizen installed in the workspace; the
+   default is the doctrine prompt + the registry-generated API section
+   (golden test — W1's deliberate change: the expected string below is
+   the doctrine ``agent_system_prompt.txt`` plus the surface registry's
+   generated core-tier section, so the prompt can never drift from the
+   code).
 2. An agent that replaces the workspace ``build_prompt`` changes the prompt
    the LLM receives (MockLLM asserts the new prompt text arrives).
 3. ``prompts.py`` is no longer orphaned: its composition is explicitly
@@ -49,33 +51,46 @@ class _FakeAgent:
         return Result(done=False, ok=False, reason="not settled")
 
 
-#: The byte-exact expected prompt for the fake agent above, captured from
-#: the pristine ``LLMDriver._build_prompt`` (driver.py @ 25bab3d) BEFORE the
-#: G-02 refactor. Any drift in the default assembly breaks this test.
-GOLDEN_PROMPT = (
-    "You are the action generator for a recursive agent runtime. "
-    "Write ONE Python block — the next action — that makes progress "
-    "on the agent's requirement. The block runs against the agent's "
-    "persistent REPL, so state persists between turns. End the block "
-    "by calling complete(...) when the requirement is satisfied, or "
-    "fail(reason) when it cannot be. Respond with ONLY the Python "
-    "code, no prose."
-    "\n\n"
-    "Available in the namespace: agent, publish(headline, summary, report), "
-    "spawn(requirement, acceptance=(), driver=None, on_done=None), "
-    "complete(headline, artifacts=()), fail(reason), cancel(reason), "
-    "status(), result(), tool(callable, *args), bash(cmd), "
-    "send(recipient_id, body), room(name), "
-    "await_(handle), poll(handle), children_of(handle), "
-    "messenger.send(recipient_id, body), escalate(requirement, reason), "
-    "ask_operator(question)."
-    "\n\n"
-    "Requirement: do the thing"
-    "\n\n"
-    "Acceptance criteria: ['done']"
-    "\n\n"
-    "Current status: done=False ok=False reason='not settled'"
-)
+from dhc.llm.driver import _load_doctrine_prompt  # noqa: E402
+from dhc.framework.surface import default_registry  # noqa: E402
+
+#: The doctrine prompt (W1.5): the hand-written prose base.
+_DOCTRINE = _load_doctrine_prompt().rstrip()
+
+#: The registry-generated API section (W1.4): the single source of truth.
+#: Computed INSIDE each test (not at module import): the registry is a
+#: process-wide singleton whose entries are re-registered (idempotently)
+#: when a runtime is wired — ``register_default_tools`` re-asserts the
+#: Wave 3 tier moves and ``register_channel_tools`` re-registers its
+#: entries — so an import-time snapshot can observe a pre-wiring state
+#: that no longer matches what ``LLMDriver._build_prompt`` renders at
+#: test time. Building the expected section per test keeps the golden
+#: comparison about *drift*, not about import order.
+
+
+def _expected_prompt() -> str:
+    """The golden prompt, rendered from the registry at call time."""
+    return (
+        _DOCTRINE
+        + "\n\n"
+        + default_registry.prompt_section()
+        + "\n\n"
+        "Requirement: do the thing"
+        "\n\n"
+        "Acceptance criteria: ['done']"
+        "\n\n"
+        "Current status: done=False ok=False reason='not settled'"
+    )
+
+
+#: The byte-exact expected prompt for the fake agent above: the doctrine
+#: prompt + the registry-generated API section + the per-agent state
+#: (W1's deliberate golden change — see the module docstring). Any drift
+#: in the doctrine file, the registry, or the assembly breaks this test.
+#: Rendered per test via :func:`_expected_prompt` (the registry is a
+#: process-wide singleton re-registered at wiring time — see the
+#: :func:`_expected_prompt` note above).
+GOLDEN_PROMPT = _expected_prompt()
 
 
 def test_golden_default_prompt_is_byte_identical():
@@ -87,7 +102,7 @@ def test_golden_default_prompt_is_byte_identical():
     """
     agent = _FakeAgent()
     driver = LLMDriver(client=None)
-    assert driver._build_prompt(agent) == GOLDEN_PROMPT
+    assert driver._build_prompt(agent) == _expected_prompt()
 
 
 def test_golden_default_prompt_with_system_prompt_and_context():
@@ -105,23 +120,10 @@ def test_golden_default_prompt_with_system_prompt_and_context():
     expected = (
         "EXTRA GUIDANCE"
         "\n\n"
-        "You are the action generator for a recursive agent runtime. "
-        "Write ONE Python block — the next action — that makes progress "
-        "on the agent's requirement. The block runs against the agent's "
-        "persistent REPL, so state persists between turns. End the block "
-        "by calling complete(...) when the requirement is satisfied, or "
-        "fail(reason) when it cannot be. Respond with ONLY the Python "
-        "code, no prose."
-        "\n\n"
-        "Available in the namespace: agent, publish(headline, summary, report), "
-        "spawn(requirement, acceptance=(), driver=None, on_done=None), "
-        "complete(headline, artifacts=()), fail(reason), cancel(reason), "
-        "status(), result(), tool(callable, *args), bash(cmd), "
-        "send(recipient_id, body), room(name), "
-        "await_(handle), poll(handle), children_of(handle), "
-        "messenger.send(recipient_id, body), escalate(requirement, reason), "
-        "ask_operator(question)."
-        "\n\n"
+        + _DOCTRINE
+        + "\n\n"
+        + default_registry.prompt_section()
+        + "\n\n"
         "Requirement: ship it"
         "\n\n"
         "Current status: done=False ok=False reason='not settled'"
@@ -157,23 +159,10 @@ def test_golden_default_prompt_no_acceptance_no_context():
     agent = _FakeAgent(requirement="minimal", acceptance=())
     driver = LLMDriver(client=None)
     expected = (
-        "You are the action generator for a recursive agent runtime. "
-        "Write ONE Python block — the next action — that makes progress "
-        "on the agent's requirement. The block runs against the agent's "
-        "persistent REPL, so state persists between turns. End the block "
-        "by calling complete(...) when the requirement is satisfied, or "
-        "fail(reason) when it cannot be. Respond with ONLY the Python "
-        "code, no prose."
-        "\n\n"
-        "Available in the namespace: agent, publish(headline, summary, report), "
-        "spawn(requirement, acceptance=(), driver=None, on_done=None), "
-        "complete(headline, artifacts=()), fail(reason), cancel(reason), "
-        "status(), result(), tool(callable, *args), bash(cmd), "
-        "send(recipient_id, body), room(name), "
-        "await_(handle), poll(handle), children_of(handle), "
-        "messenger.send(recipient_id, body), escalate(requirement, reason), "
-        "ask_operator(question)."
-        "\n\n"
+        _DOCTRINE
+        + "\n\n"
+        + default_registry.prompt_section()
+        + "\n\n"
         "Requirement: minimal"
         "\n\n"
         "Current status: done=False ok=False reason='not settled'"
@@ -198,7 +187,7 @@ def test_build_prompt_is_a_kit_citizen(tmp_path):
         assert callable(ns["build_prompt"])
         # The default citizen reproduces the golden prompt byte-identically.
         fake = _FakeAgent()
-        assert ns["build_prompt"](fake) == GOLDEN_PROMPT
+        assert ns["build_prompt"](fake) == _expected_prompt()
     finally:
         rt.stop()
 
@@ -237,8 +226,8 @@ def test_agent_replacing_build_prompt_changes_the_llm_prompt(tmp_path):
         comp = rt.await_(root.id)
         assert comp.status.value == "completed", comp.reason
         assert len(seen) == 2, f"expected two LLM calls, saw {len(seen)}"
-        # Turn 1 carried the default assembly...
-        assert seen[0].startswith("You are the action generator")
+        # Turn 1 carried the default assembly (the doctrine prompt)...
+        assert seen[0].startswith("# Dynamic Harness Code (dhc)")
         assert "Requirement: observe the swap" in seen[0]
         # ...and turn 2 carried the agent's replacement.
         assert seen[1] == "CUSTOM PROMPT: observe the swap"

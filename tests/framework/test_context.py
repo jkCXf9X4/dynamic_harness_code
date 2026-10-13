@@ -321,3 +321,26 @@ def _isolate_config(monkeypatch, tmp_path):
     monkeypatch.setattr(config_mod, "_settings", None)
     yield
     monkeypatch.setattr(config_mod, "_settings", None)
+
+
+def test_read_only_helpers_expose_registry(tmp_path):
+    """W4.5: agents_snapshot() / is_stopped() replace direct private reads.
+
+    A manually-registered agent (the same bookkeeping spawn does) is
+    visible through the public read-only helpers, and mutating the
+    snapshot does not affect the runtime.
+    """
+    rt = build_runtime(mock=True, artifact_root=str(tmp_path))
+    rt.start()
+    try:
+        agent = _register_agent(rt, agent_id="ctx1")
+        snap = rt.agents_snapshot()
+        assert set(snap) == {"ctx1"}
+        assert snap["ctx1"] is agent
+        # Mutating the snapshot must not touch the runtime's registry.
+        snap.pop("ctx1")
+        assert "ctx1" in rt.agents_snapshot()
+        # is_stopped() is False for a live (un-cancelled) agent.
+        assert rt.is_stopped("ctx1") is False
+    finally:
+        rt.stop()

@@ -36,6 +36,37 @@ def _new_id() -> str:
     return uuid.uuid4().hex
 
 
+def _artifact_ids(items: Any) -> list[str]:
+    """Coerce *items* to artifact id strings (W3.1).
+
+    Accepts an :class:`Artifact` object (→ its ``.id``), an id string
+    (→ as-is), or an iterable of either. Anything else raises
+    ``TypeError`` naming the accepted types — a misspelled attribute or a
+    stray model never silently becomes a bogus id.
+    """
+    if isinstance(items, (str, Artifact)):
+        items = [items]
+    try:
+        iterator = iter(items)
+    except TypeError:
+        raise TypeError(
+            f"artifacts must be Artifact objects or artifact id strings, "
+            f"got {type(items).__name__!r}"
+        ) from None
+    ids: list[str] = []
+    for item in iterator:
+        if isinstance(item, Artifact):
+            ids.append(item.id)
+        elif isinstance(item, str):
+            ids.append(item)
+        else:
+            raise TypeError(
+                "artifacts must be Artifact objects or artifact id strings, "
+                f"got {type(item).__name__!r}"
+            )
+    return ids
+
+
 # --------------------------------------------------------------------------- #
 # Enums
 # --------------------------------------------------------------------------- #
@@ -138,6 +169,9 @@ class Result(BaseModel):
     """Outcome of a coded action.
 
     ``artifacts`` holds artifact *ids* (by reference), never full bodies.
+    Each item may be an :class:`Artifact` object (coerced to its ``.id``)
+    or an id string — anything else is a ``TypeError`` (W3.1: the
+    publish→id→complete juggling is no longer required; pass the object).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -147,6 +181,18 @@ class Result(BaseModel):
     value: Any = None
     reason: str = ""
     artifacts: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_artifacts(cls, data: Any) -> Any:
+        """Accept Artifact objects or id strings in ``artifacts`` (W3.1)."""
+        if not isinstance(data, dict):
+            return data
+        items = data.get("artifacts")
+        if items is None:
+            return data
+        data["artifacts"] = _artifact_ids(items)
+        return data
 
 
 # --------------------------------------------------------------------------- #
@@ -268,10 +314,18 @@ class ToolOutput(BaseModel):
 
 
 class Message(BaseModel):
-    """A point-to-point message between two agents."""
+    """A point-to-point message between two agents.
+
+    ``id`` is a stable identifier (uuid hex, default factory) so the
+    read-state API works from the inbox's own output: ``inbox()`` returns
+    messages whose ``.id`` can be passed straight to ``read(message_id)``
+    (W3.3 — the id previously existed only in event payloads, making
+    ``messenger.read`` unusable from its own inbox).
+    """
 
     model_config = ConfigDict(frozen=True)
 
+    id: str = Field(default_factory=_new_id)
     sender_id: str
     recipient_id: str
     body: str

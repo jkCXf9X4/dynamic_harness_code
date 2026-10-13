@@ -10,11 +10,9 @@ from __future__ import annotations
 from dhc.llm.prompts import (
     AGENT_SYSTEM_PROMPT,
     ORCHESTRATOR_ROLE,
-    ORCHESTRATOR_SYSTEM_PROMPT,
     build_steerage,
     build_system_prompt,
     build_user_message,
-    compose_initial_prompt,
 )
 
 
@@ -30,19 +28,28 @@ def test_agent_system_prompt_loads_from_file_and_has_key_phrases():
     assert "context hygiene" in AGENT_SYSTEM_PROMPT.lower()
 
 
-def test_build_system_prompt_prepends_orchestrator_only_for_orchestrator_role():
+def test_build_system_prompt_is_a_thin_role_overlay():
+    """W1.5: the orchestrator directive is gone (it taught callables that
+    do not exist in the agent namespace); any role gets a scope tag and
+    the base is appended unchanged."""
     base = "BASE PROMPT"
     plain = build_system_prompt(base, role=None)
     assert plain == "BASE PROMPT"
-    assert ORCHESTRATOR_SYSTEM_PROMPT not in plain
 
     scoped = build_system_prompt(base, role="security-auditor")
     assert "security-auditor" in scoped
-    assert ORCHESTRATOR_SYSTEM_PROMPT not in scoped
+    assert "BASE PROMPT" in scoped
 
-    orch = build_system_prompt(base, role=ORCHESTRATOR_ROLE)
-    assert orch.startswith(ORCHESTRATOR_SYSTEM_PROMPT)
+    # The historical delegation-only directive must not resurface.
+    assert "ORCHESTRATOR" not in scoped
+    assert "delegate" not in scoped.lower() or "delegat" not in scoped.lower()
+
+
+def test_build_system_prompt_orchestrator_role_is_just_a_scope_tag():
+    """role=ORCHESTRATOR_ROLE is now an ordinary scope tag (W1.5)."""
+    orch = build_system_prompt("BASE PROMPT", role=ORCHESTRATOR_ROLE)
     assert "BASE PROMPT" in orch
+    assert ORCHESTRATOR_ROLE in orch
 
 
 def test_build_steerage_includes_provided_blocks_and_omits_none():
@@ -78,46 +85,14 @@ def test_build_steerage_includes_provided_blocks_and_omits_none():
     assert "[ENVIRONMENT]" not in partial
 
 
-def test_compose_initial_prompt_contains_requirement_and_steerage():
-    composed = compose_initial_prompt(
-        "Build the widget",
-        role=ORCHESTRATOR_ROLE,
-        intent="Adopt presetup pattern",
-        end_state="Tests green",
-        constraints=["No new deps"],
-        authority="Adjust signatures",
-        focus="Prompts",
-        budget="7200s",
-        environment="Python 3.10",
-    )
-    assert "Build the widget" in composed
-    assert "[INTENT] Adopt presetup pattern" in composed
-    assert "[END STATE] Tests green" in composed
-    assert "- No new deps" in composed
-    assert "[AUTHORITY] Adjust signatures" in composed
-    assert "[FOCUS] Prompts" in composed
-    assert "[BUDGET] 7200s" in composed
-    assert "[ENVIRONMENT]" in composed
-    assert ORCHESTRATOR_SYSTEM_PROMPT in composed
-    assert AGENT_SYSTEM_PROMPT.rstrip() in composed
-
-
-def test_compose_initial_prompt_is_deterministic_byte_identical():
-    kwargs = dict(
-        requirement="Build the widget",
-        role=ORCHESTRATOR_ROLE,
-        intent="Adopt presetup pattern",
-        end_state="Tests green",
-        constraints=["No new deps", "Python 3.10"],
-        authority="Adjust signatures",
-        focus="Prompts",
-        budget="7200s",
-        environment="Python 3.10.12",
-    )
-    first = compose_initial_prompt(**kwargs)
-    second = compose_initial_prompt(**kwargs)
-    assert first == second
-    assert first.encode("utf-8") == second.encode("utf-8")
+def test_agent_system_prompt_has_no_drifted_callable_teachings():
+    """W1.5: the doctrine prompt teaches no callable that is not in the
+    agent surface (the conformance test cross-checks the wired namespace;
+    this pins the key drift the rewrite removed)."""
+    for drifted in ("converse(", "report()", "plan(steps", "`prune`", "`compress`"):
+        assert drifted not in AGENT_SYSTEM_PROMPT, drifted
+    # escalate takes TWO args now.
+    assert "escalate(reason)" not in AGENT_SYSTEM_PROMPT
 
 
 def test_build_user_message_includes_role_and_requirement():

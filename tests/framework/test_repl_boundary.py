@@ -92,7 +92,7 @@ def test_namespace_agent_is_facade_not_raw_agent():
             "send",
             "complete",
             "fail",
-            "cancel",
+            "record_result",
             "status",
             "result",
             "tool",

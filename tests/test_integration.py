@@ -33,42 +33,16 @@ from dhc import (  # noqa: E402
 )
 from dhc.errors import ChannelError  # noqa: E402
 from dhc.data.models import Completion  # noqa: E402
-
-CHILD_OK = (
-    "art = publish('child finding', 'child summary', 'child report body')\n"
-    "result = complete('child done', artifacts=[art.id])\n"
+from examples._mock_scripts import (  # noqa: E402
+    CHILD_FAIL,
+    build_child_ok,
+    build_root_script,
 )
 
-CHILD_FAIL = (
-    "result = fail('risk data source unavailable; requirement unreachable')\n"
-)
-
-ROOT_SCRIPT = [
-    # Turn 1: publish the plan, spawn 3 children (fan-out, INFO-009).
-    (
-        "plan = publish('research plan', 'fan out to 3 children', "
-        "{'plan': 'market research on AI agents'})\n"
-        "c1 = spawn('research market size', acceptance=('done',), "
-        "driver=MockDriver.single(" + repr(CHILD_OK) + "))\n"
-        "c2 = spawn('research competitors', acceptance=('done',), "
-        "driver=MockDriver.single(" + repr(CHILD_OK) + "))\n"
-        "c3 = spawn('research risks', acceptance=('done',), "
-        "driver=MockDriver.single(" + repr(CHILD_FAIL) + "))\n"
-        "result = complete('spawned 3 children', artifacts=[plan.id])\n"
-    ),
-    # Turn 2: await every child (ensure-terminal), aggregate the artifact ids
-    # of the survivors, publish the final artifact, complete.
-    (
-        "ids = []\n"
-        "for h in (c1, c2, c3):\n"
-        "    comp = await_(h)\n"
-        "    if comp.status.value == 'completed':\n"
-        "        ids.extend(comp.artifact_ids)\n"
-        "final = publish('final report', 'aggregated findings', "
-        "{'artifact_ids': ids})\n"
-        "result = complete('root done', artifacts=[final.id])\n"
-    ),
-]
+# Shared mock scripts (examples/_mock_scripts.py): the integration test uses
+# a short literal report body; the value demo uses the long CHILD_REPORT.
+CHILD_OK = build_child_ok("child report body")
+ROOT_SCRIPT = build_root_script(CHILD_OK)
 
 
 @pytest.fixture()
@@ -105,14 +79,14 @@ def test_full_session_end_to_end(runtime):
 
     # The root's final artifact id is present in the real store.
     final_id = root_completion.artifact_ids[0]
-    assert runtime.artifact_store_real.exists(final_id)
-    assert runtime.artifact_store_real.get_summary(final_id) == "aggregated findings"
+    assert runtime.artifact_store.exists(final_id)
+    assert runtime.artifact_store.get_summary(final_id) == "aggregated findings"
 
     # Every child artifact id is present in the store.
     for cid in children:
         comp = runtime.await_(cid)
         for aid in comp.artifact_ids:
-            assert runtime.artifact_store_real.exists(aid)
+            assert runtime.artifact_store.exists(aid)
 
     # Boundary event log: spawned/settled/published with causal ids.
     spawned = runtime.boundary_log.read(kind="spawned")
@@ -169,7 +143,7 @@ def test_progressive_disclosure_via_real_store(runtime):
     assert comp.status.value == "completed"
     aid = comp.artifact_ids[0]
 
-    store = runtime.artifact_store_real
+    store = runtime.artifact_store
     assert store.get_headline(aid) == "headline here"
     assert store.get_summary(aid) == "summary here"
     assert store.get_report(aid) == {"body": "full report"}
