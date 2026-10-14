@@ -74,6 +74,7 @@ status: current
 
 - **`tooling/fabrication.py`**: the default agent.
   - The fabrication kit a workspace is born with: default `__runner__`, `decide`, context, helpers.
+  - `run_block` = run_code surface: validated `def call(self, spec)` snippet, invoked with the agent facade; `exec_block` = raw block exec, the default runner's path.
   - Handed in via `Runtime(kit_factory=...)` (`AD-011`).
 - **`tooling/framework_tools.py`**: framework-surface tools: `list_tools`, `events`, `ack`, `answers`, `gather` (W3.5/W3.6/W3.8).
   - `events` moved out of the framework (`AD-010`).

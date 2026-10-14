@@ -412,8 +412,9 @@ def pump_loop(
             # that source. Re-install only when the source changed AND is
             # not the kit's default (the default comes from the composed
             # kit, 0017): the wired namespace re-injects the default
-            # `__runner` on every run_block, so a custom runner that calls
-            # run_block must NOT be replaced by the default runner (we
+            # `__runner` on every block exec (both `run_block` and
+            # `exec_block` refresh the namespace), so a custom runner that
+            # calls either must NOT be replaced by the default runner (we
             # are between steps here, so the runner is never parked).
             source = engine.globals_for(agent_id).get("__runner")
             if (

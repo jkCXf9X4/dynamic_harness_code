@@ -261,8 +261,8 @@ class ReplEngine:
         Reentrant companion to :meth:`inject`: safe to call from inside an
         advance (the pump already holds the per-agent lock during a step),
         mirroring :meth:`run_block`'s reentrancy. Used by the fabrication
-        kit's ``run_block`` to refresh the in-code surface between nested
-        execs.
+        kit's ``run_block``/``exec_block`` to refresh the in-code surface
+        between nested execs.
         """
         with self._dict_lock:
             workspace = self._workspaces.get(agent_id)
