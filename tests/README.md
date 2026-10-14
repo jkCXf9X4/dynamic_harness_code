@@ -25,7 +25,7 @@ decision 0016 is visible here too: `framework/` tests the control loop,
 
 | directory | tests |
 |---|---|
-| `framework/` | `test_runtime`, `test_repl`, `test_repl_resumable`, `test_event_stream`, `test_event_fanout`, `test_context`, `test_core_tooling_boundary` (the framework↔tooling↔ui guard), `test_direct_messaging` (the `send` primitive, 0015), `test_rot_policy`, `test_token_cost`, `test_h04_monotonic_timebase`, `test_h07_legacy_loop`, `test_g05_parked_time`, `test_composition_wave1`, `test_subagent_setup` (child-agent setup from synthesized `run_block`/`agent.tool` calls, plus the injected `def call(self, spec)` delegation-snippet idiom) |
+| `framework/` | `test_runtime`, `test_repl`, `test_repl_resumable`, `test_event_stream`, `test_event_fanout`, `test_context`, `test_core_tooling_boundary` (the framework↔tooling↔ui guard), `test_direct_messaging` (the `send` primitive, 0015), `test_rot_policy`, `test_token_cost`, `test_h04_monotonic_timebase`, `test_h07_legacy_loop`, `test_g05_parked_time`, `test_composition_wave1`, `test_subagent_setup` (child-agent setup from synthesized run_code/invoke calls — `run_block` enforces the `def call(self, spec)` snippet format — plus the injected delegation-snippet idiom and the format/sharing-contract guards) |
 | `llm/` | `test_llm`, `test_prompts`, `test_prompt_assembly` |
 | `ui/` | `test_terminal`, `test_operator`, `test_state` (the operator's review files), `test_checkpoint_split` + `test_checkpoint_trace` (the operator's resumability store, 0012 — moved with their modules in 0016) |
 | `data/` | `test_models`, `test_config` |

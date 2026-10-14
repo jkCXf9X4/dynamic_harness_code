@@ -99,7 +99,7 @@ def test_composition_pump_gate_order_all_six(tmp_path):
     exercises the caps gate (via a tight agent budget, G-01), the parked
     credit (G-05, via a parked Sleep), the rot gate (G-06, default
     observe-only policy present as workspace data) and the integrity guard
-    (G-02/G-03, all 10 kit citizens installed) must settle through the
+    (G-02/G-03, all 11 kit citizens installed) must settle through the
     composed pipeline, not around it.
     """
     from dhc.llm.driver import MockDriver
@@ -126,8 +126,8 @@ def test_composition_pump_gate_order_all_six(tmp_path):
         ws = rt.repl_engine.globals_for(handle.id)
         # The rot policy (G-06) is present as workspace data.
         assert ws["state"].get("rot_seen") is True
-        # The integrity guard (G-02 x G-03) sees all 10 kit citizens.
-        assert len(FABRICATION_NAMES) == 10
+        # The integrity guard (G-02 x G-03) sees all 11 kit citizens.
+        assert len(FABRICATION_NAMES) == 11
         assert "build_prompt" in FABRICATION_NAMES
         # No crash event: no gate tripped on a healthy composed run.
         crashes = [e for e in rt.events(handle.id) if e.kind == EventKind.crash]

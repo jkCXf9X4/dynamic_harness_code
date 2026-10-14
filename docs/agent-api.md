@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE — do not edit. Regenerate with python3 tools/generate_agent_api.py -->
 
-Every name an agent's action block can call, generated from the surface registry (`src/dhc/framework/surface.py`) — the same single source of truth the prompt's API section is rendered from. The registry currently holds 47 entries: 29 core, 3 advanced, 15 internal.
+Every name an agent's action block can call, generated from the surface registry (`src/dhc/framework/surface.py`) — the same single source of truth the prompt's API section is rendered from. The registry currently holds 48 entries: 29 core, 3 advanced, 16 internal.
 
 - **core** — prompt-visible and in `list_tools()`: the vocabulary an agent is taught.
 - **advanced** — in `list_tools()` but not prompt-visible: reachable, not advertised.
@@ -428,8 +428,8 @@ Reachable, not advertised (visible via `list_tools()`):
 
 ## Internal
 
-15 injected-machinery names, never advertised: `__runner`, `acceptance_met`, `build_prompt`, `caps`, `checkpoint`, `compact`, `context`, `decide`, `ensure_fabrication`, `observe`, `rollback`, `run_block`, `settle`, `settle_completed`, `state`.
+16 injected-machinery names, never advertised: `__runner`, `acceptance_met`, `build_prompt`, `caps`, `checkpoint`, `compact`, `context`, `decide`, `ensure_fabrication`, `exec_block`, `observe`, `rollback`, `run_block`, `settle`, `settle_completed`, `state`.
 
 ---
 
-<!-- registry-hash: f91db3e2d1805126 -->
+<!-- registry-hash: cc3f8dcc55bc3246 -->

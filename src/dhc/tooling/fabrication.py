@@ -10,7 +10,13 @@ behavior exactly —
 * ``decide(context)`` — the default decide fabrication wrapping the current
   LLM/Mock brain; ``driver.__call__`` becomes the default decide and its
   bookkeeping (``_turns``/``_calls``) moves into workspace state.
-* ``run_block`` — non-locking nested exec against the workspace.
+* ``run_block`` — the run_code surface: a validated ``def call(self, spec)``
+  snippet, exec'd against the workspace and invoked with the agent facade
+  (data crosses via ``spec`` in, the return value out, ``state`` for
+  persistence; payload locals stay function-scoped).
+* ``exec_block`` — the raw non-locking nested exec against the workspace
+  (the default runner's block path; driver-produced blocks have no format
+  requirements).
 * ``build_prompt`` — the default prompt assembly (G-02): a kit citizen
   wrapping the byte-identical extraction of the historical
   ``LLMDriver._build_prompt``; an agent that replaces it changes the prompt
@@ -37,28 +43,32 @@ members — they are registered tools over the core ``send`` primitive
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+import ast
+from typing import Any, Callable, NamedTuple, Optional
 
 from ..framework.context import make_observe as _context_make_observe
 from ..llm.driver import default_build_prompt, driver_from_settings
-from ..data.models import AgentStatus, EventKind
+from ..data.models import AgentStatus, EventKind, Result
 
 #: The default agent loop, authored as workspace code (IMP-001 D4).
 #: The agent views/edits/replaces this string in its own workspace globals.
 DEFAULT_RUNNER_SOURCE = '''\
 def __runner__(ctx):
-    """Default agent loop (IMP-001 D4): decide -> run_block -> settle.
+    """Default agent loop (IMP-001 D4): decide -> exec_block -> settle.
 
     Replicates today's turn loop exactly: decide the next block, run it,
     consume happenings, settle. Yields after each turn so the pump can
-    checkpoint between steps.
+    checkpoint between steps. Driver-produced blocks run through
+    ``exec_block`` (the raw internal exec — no format requirements);
+    ``run_block`` is the agent-facing run_code surface for synthesized
+    ``def call(self, spec)`` snippets.
     """
     while True:
         code = ctx["decide"](ctx)
         if code is None:
             ctx["settle"]()
             return
-        ctx["run_block"](code)
+        ctx["exec_block"](code)
         ctx["observe"]()
         if ctx["acceptance_met"]():
             ctx["settle_completed"]()
@@ -71,6 +81,7 @@ FABRICATION_NAMES: tuple[str, ...] = (
     "__runner",
     "decide",
     "run_block",
+    "exec_block",
     "context",
     "ensure_fabrication",
     "checkpoint",
@@ -85,7 +96,8 @@ FABRICATION_NAMES: tuple[str, ...] = (
 _KIT_ENTRY_DOCS: dict[str, str] = {
     "__runner": "The default agent loop source (workspace citizen).",
     "decide": "The default decision fabrication (driver -> next block).",
-    "run_block": "Execute one block in the agent's persistent REPL.",
+    "run_block": "Execute a 'def call(self, spec)' snippet (the run_code surface).",
+    "exec_block": "The raw block exec the default runner uses (no format check).",
     "context": "The workspace context citizen (guardrails, budgets, state).",
     "ensure_fabrication": "Re-seed missing kit citizens after a wipe.",
     "checkpoint": "Persist recoverable progress for this agent.",
@@ -218,24 +230,163 @@ def make_decide(driver: Any, agent: Any, state: dict) -> Callable[[Any], Optiona
 # falling back to the default; see ``LLMDriver._build_prompt``.
 
 
-# -- run_block ------------------------------------------------------------- #
+# -- run_block / exec_block ----------------------------------------------- #
+
+
+class _PayloadCheck(NamedTuple):
+    """A run_code payload format check (see :func:`_check_run_code_payload`)."""
+
+    #: ``None`` when the payload matches the enforced format, else the
+    #: failure as a ``"ExceptionType: message"`` reason string.
+    error: Optional[str]
+    #: True when the entrypoint declares ``spec`` (invoked with two args).
+    takes_spec: bool
+
+
+def _check_run_code_payload(code: str) -> _PayloadCheck:
+    """Validate a run_code payload: exactly one module-level ``def call``.
+
+    The enforced format — the same shape as the delegation snippet::
+
+        def call(self, spec):
+            ...
+
+    * exactly one module-level ``def call`` (sync; a duplicate is an error),
+    * the first parameter is named ``self`` (the agent facade),
+    * an optional second parameter is named ``spec`` (the call arguments),
+    * no further parameters (no ``*args``/``**kwargs``/keyword-only),
+    * supporting module-level statements (imports, helper defs) are
+      allowed around the entrypoint.
+    """
+    try:
+        tree = ast.parse(code, mode="exec")
+    except SyntaxError as exc:
+        return _PayloadCheck(f"SyntaxError: {exc}", False)
+    defs = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "call"
+    ]
+    if not defs:
+        return _PayloadCheck(
+            "ValueError: run_code payloads must be 'def call(self, spec)' "
+            "snippets — no module-level 'call' function found",
+            False,
+        )
+    if len(defs) > 1:
+        return _PayloadCheck(
+            "ValueError: run_code payloads must define exactly one "
+            f"'def call' — found {len(defs)}",
+            False,
+        )
+    fn = defs[0]
+    if isinstance(fn, ast.AsyncFunctionDef):
+        return _PayloadCheck(
+            "ValueError: 'def call' must be a plain (sync) function", False
+        )
+    a = fn.args
+    if a.vararg or a.kwarg or a.kwonlyargs:
+        return _PayloadCheck(
+            "ValueError: 'def call' takes only 'self' and an optional "
+            "'spec' — no *args/**kwargs/keyword-only parameters",
+            False,
+        )
+    names = [p.arg for p in (*a.posonlyargs, *a.args)]
+    if not names or names[0] != "self":
+        return _PayloadCheck(
+            "ValueError: 'def call' must name its first parameter 'self' "
+            "(the agent facade it is invoked with)",
+            False,
+        )
+    if len(names) > 2:
+        return _PayloadCheck(
+            "ValueError: 'def call' takes at most (self, spec)", False
+        )
+    takes_spec = len(names) == 2
+    if takes_spec and names[1] != "spec":
+        return _PayloadCheck(
+            "ValueError: 'def call' must name its second parameter 'spec' "
+            "(the call arguments)",
+            False,
+        )
+    return _PayloadCheck(None, takes_spec)
+
+
+def make_exec_block(
+    engine: Any, agent_id: str, namespace_builder: Callable[[], dict]
+) -> Callable[..., Any]:
+    """Bound ``exec_block``: raw non-locking nested exec against the workspace.
+
+    The internal block-execution path: refreshes the in-code surface (the
+    namespace) into the workspace before each exec — the same per-turn
+    refresh the committed runtime does — so a block sees
+    ``publish``/``complete``/``agent``/... even when the default
+    ``__runner`` is driven directly through ``ReplEngine.advance`` without
+    the pump. The default ``__runner`` routes driver-produced blocks
+    (MockDriver scripts, LLM output) through here precisely because they
+    have no format requirements.
+    """
+
+    def exec_block(code: str) -> Any:
+        engine.inject_nolock(agent_id, namespace_builder())
+        return engine.run_block(agent_id, code)
+
+    return exec_block
 
 
 def make_run_block(
     engine: Any, agent_id: str, namespace_builder: Callable[[], dict]
 ) -> Callable[..., Any]:
-    """Bound ``run_block``: non-locking nested exec against the workspace.
+    """Bound ``run_block``: the run_code surface — a validated snippet.
 
-    Refreshes the in-code surface (the namespace) into the workspace before
-    each exec — the same per-turn refresh the committed runtime does — so a
-    block sees ``publish``/``complete``/``agent``/... even when the default
-    ``__runner`` is driven directly through ``ReplEngine.advance`` without
-    the pump.
+    The agent-facing path for *synthesized* code. The payload must be a
+    ``def call(self, spec)`` snippet (:func:`_check_run_code_payload`
+    enforces the shape, error-as-value per INFO-020); it is exec'd against
+    the agent's persistent workspace and then INVOKED with the agent
+    facade as ``self`` — the same format and receiver discipline as the
+    delegation snippet, so one shape governs all agent-side code.
+
+    Data crosses the boundary only through the snippet contract: ``spec``
+    in (the call arguments), the return value out (``res.value``), and the
+    persistent ``state`` dict. Payload locals stay function-scoped (they
+    never leak into the workspace); module-level names the payload defines
+    (``call`` itself, helpers, imports) are ordinary workspace citizens,
+    like any block. A payload whose entrypoint returns ``None`` falls back
+    to the raw exec's Result (the workspace ``result`` slot, e.g. a
+    ``complete()`` the module-level statements recorded).
+
+    The receiver is the facade the refreshed namespace binds as ``agent``,
+    captured before the payload runs so a module-level ``agent = ...``
+    cannot redirect it. ``engine.run_block`` itself stays format-free —
+    that raw path is what ``exec_block`` exposes to the default runner.
     """
 
-    def run_block(code: str) -> Any:
-        engine.inject_nolock(agent_id, namespace_builder())
-        return engine.run_block(agent_id, code)
+    def run_block(code: str, spec: Any = None) -> Any:
+        checked = _check_run_code_payload(code)
+        if checked.error is not None:
+            return Result(done=True, ok=False, reason=checked.error)
+        ns = namespace_builder()
+        facade = ns.get("agent")
+        engine.inject_nolock(agent_id, ns)
+        res = engine.run_block(agent_id, code)
+        if not res.ok:
+            return res
+        ws = engine.globals_for(agent_id)
+        call_fn = ws.get("call")
+        if not callable(call_fn):
+            return Result(
+                done=True,
+                ok=False,
+                reason="ValueError: payload left no callable 'call'",
+            )
+        try:
+            value = call_fn(facade, spec) if checked.takes_spec else call_fn(facade)
+        except BaseException as exc:  # noqa: BLE001 - contained per INFO-005
+            return Result(done=True, ok=False, reason=f"{type(exc).__name__}: {exc}")
+        if value is None:
+            return res
+        return Result(done=True, ok=True, value=value)
 
     return run_block
 
@@ -454,6 +605,12 @@ def make_ensure_fabrication(
             engine.inject(agent_id, {"run_block": kit["run_block"]})
             reseeded.append("run_block")
 
+        xb = ws.get("exec_block")
+        if not callable(xb):
+            kit = kit_builder()
+            engine.inject(agent_id, {"exec_block": kit["exec_block"]})
+            reseeded.append("exec_block")
+
         bp = ws.get("build_prompt")
         if not callable(bp):
             kit = kit_builder()
@@ -548,6 +705,9 @@ def fabrication_kit(runtime: Any, engine: Any, agent: Any) -> dict:
     run_block = make_run_block(
         engine, agent_id, lambda: runtime._build_namespace(agent)
     )
+    exec_block = make_exec_block(
+        engine, agent_id, lambda: runtime._build_namespace(agent)
+    )
     observe = make_observe(runtime, agent_id, state)
     settle = make_settle(runtime, agent_id)
     acceptance_met = make_acceptance_met(runtime, agent_id)
@@ -567,6 +727,7 @@ def fabrication_kit(runtime: Any, engine: Any, agent: Any) -> dict:
         "__runner": DEFAULT_RUNNER_SOURCE,
         "decide": decide,
         "run_block": run_block,
+        "exec_block": exec_block,
         "context": context,
         "ensure_fabrication": ensure_fabrication,
         "checkpoint": checkpoint,

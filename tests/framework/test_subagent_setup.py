@@ -4,23 +4,34 @@ The literal fan-out idiom (a driver-scripted block writing
 ``c1 = spawn(...)`` by hand) is pinned by ``test_integration`` and
 ``examples/_mock_scripts.py``. But agents routinely *compose* the calls
 that set up their children instead of writing them literally: a task list
-becomes one spawn call per entry, a risky setup is probed before it is
+becomes one setup call per entry, a risky setup is probed before it is
 trusted, and a helper is invoked rather than inlined. This suite pins
 that those synthesized paths are as easy and as well-behaved as the
 literal one, on the fully-wired runtime:
 
-* run_code — ``run_block(code)`` executes a synthesized string against
-  the agent's own persistent workspace, so names the synthesized code
-  defines (the child handle) are workspace citizens the joining code
-  reads back (the nested exec and the outer block share one workspace).
+* run_code — ``run_block(code, spec)`` executes a synthesized
+  ``def call(self, spec)`` snippet against the agent's own persistent
+  workspace and INVOKES it with the agent facade as ``self`` — the same
+  format and receiver discipline as the delegation snippet below, so one
+  shape governs all agent-side code. The format is enforced (a flat
+  payload is rejected as a failed ``Result`` naming the required shape),
+  and data crosses the boundary only through the snippet contract:
+  ``spec`` in, the return value out (``res.value``), and ``state`` for
+  persistence. Payload locals stay function-scoped — they never leak
+  into the workspace — while module-level names the payload defines
+  (``call`` itself, helpers) are ordinary workspace citizens. The
+  default runner's driver-produced blocks bypass this entirely (the raw
+  ``exec_block``): enforcement is on the run_code surface, not on the
+  internal block path.
 * invoke — ``agent.tool(callable, ...)`` wraps a setup helper in a
   ``ToolResult`` envelope: a failure inside the helper is a value
   (``ok=False`` + text, INFO-020), not a transport break that kills the
   turn.
 * data-driven fan-out — a plain list of requirements becomes a list of
-  spawned, joined children with no boilerplate beyond the loop — the
-  agent synthesizes one setup call per task with an ordinary f-string;
-  ``gather`` (W3.8) is the join.
+  spawned, joined children with no boilerplate beyond the loop: one
+  setup snippet, one run_code call per task with a different ``spec``
+  (the call arguments make it data-driven); ``gather`` (W3.8) is the
+  join.
 * the delegation snippet — the composed form that stays readable at any
   recursion depth: the parent authors the child's behavior as a REAL
   function (``def call(self, spec)`` — receiver and call arguments
@@ -39,9 +50,12 @@ The blocking join (``await_`` / ``gather``) is the in-block idiom. The
 ``exec`` code is a ``SyntaxError``.
 
 Driver scripts in this file are written as dedented triple-quoted blocks
-so the code reads as the agent writes it (indented triple-quoted text
-would be an ``IndentationError`` in ``exec`` code; ``textwrap.dedent``
-restores column-0 statements while keeping relative indentation).
+so the code reads as the agent writes it (indented triple-quoted text would be
+an ``IndentationError`` in ``exec`` code; ``textwrap.dedent`` restores
+column-0 statements while keeping relative indentation). Snippet payloads
+embedded in those blocks use ``'''`` literals — after the outer dedent
+they land at column 0 with their relative indentation intact, so a
+payload reads as the plain Python it is.
 """
 
 from __future__ import annotations
@@ -64,34 +78,28 @@ def runtime(tmp_path):
     rt.stop()
 
 
-def _spawn_call(requirement: str, child_block: str, target: str = "h") -> str:
-    """The synthesized one-line subagent setup call (the run_code payload).
-
-    The child's driver script is inlined via ``repr()`` so the synthesized
-    string is self-contained — the same trick ``examples/_mock_scripts.py``
-    uses for literal blocks.
-    """
-    return (
-        f"{target} = spawn({requirement!r}, "
-        f"driver=MockDriver.single({child_block!r}))"
-    )
-
-
 # --------------------------------------------------------------------------- #
-# run_code: a synthesized string sets up the child
+# run_code: a synthesized snippet sets up the child
 # --------------------------------------------------------------------------- #
 
 
-def test_synthesized_run_code_spawns_and_handle_persists(runtime):
+def test_synthesized_run_code_spawns_and_returns_handle(runtime):
     """One ``run_block`` call carries the whole child setup — requirement
-    plus the child's driver script — and the handle the nested exec
-    assigns is a workspace citizen the joining code reads back."""
-    setup = _spawn_call("count stars", "complete('stars counted')")
+    plus the child's driver script — as a ``def call(self)`` snippet; the
+    handle the snippet returns comes back as ``res.value`` (the outbound
+    channel of the snippet contract), and the ``call`` entrypoint itself
+    persists as a workspace citizen: module-level names the payload
+    defines still share the workspace, locals do not."""
     block = textwrap.dedent(
-        f"""
-        setup_code = {setup!r}
-        run_block(setup_code)
-        comp = await_(h)
+        """
+        setup_code = '''
+        def call(self):
+            h = self.spawn('count stars',
+                           driver=MockDriver.single("complete('stars counted')"))
+            return h
+        '''
+        res = run_block(setup_code)
+        comp = await_(res.value)
         result = complete('child said: ' + comp.summary)
         """
     )
@@ -108,28 +116,38 @@ def test_synthesized_run_code_spawns_and_handle_persists(runtime):
     assert child_comp.status == AgentStatus.completed
     assert child_comp.summary == "stars counted"
 
-    # The nested exec's assignment persisted in the parent's workspace:
-    # the joining code and the synthesized code share one workspace.
     ws = runtime.repl_engine.globals_for(root.id)
-    assert "h" in ws
-    assert ws["h"].id == children[0]
+    # The outbound channel: the snippet's return value is res.value.
+    assert ws["res"].value.id == children[0]
+    # Module-level payload names are workspace citizens...
+    assert callable(ws["call"])
+    # ...but payload locals are function-scoped and never leak.
+    assert "h" not in ws
 
 
 def test_data_driven_fanout_via_synthesized_spawn_calls(runtime):
     """A list of requirements becomes spawned-and-joined children: the
-    agent synthesizes one setup call per task with an ordinary f-string,
-    keeps the handles in a list, and joins with ``gather`` — no
-    boilerplate beyond the loop, and no repr-escaping anywhere."""
+    agent writes ONE setup snippet — the call arguments make it
+    data-driven, ``spec`` carrying the requirement and the child's
+    script — and synthesizes one run_code call per task with a different
+    ``spec``, keeping the returned handles in a list for a single
+    ``gather`` join. No boilerplate beyond the loop, and no repr-escaping
+    anywhere."""
     block = textwrap.dedent(
         """
+        setup_code = '''
+        def call(self, spec):
+            h = self.spawn(spec['requirement'],
+                           driver=MockDriver.single(spec['child']))
+            return h
+        '''
         tasks = ['alpha', 'beta', 'gamma']
         handles = []
         for task in tasks:
-            child = f"complete('done: {task}')"
-            req = 'do ' + task
-            code = f'h = spawn({req!r}, driver=MockDriver.single({child!r}))'
-            run_block(code)
-            handles.append(h)
+            spec = {'requirement': 'do ' + task,
+                    'child': f"complete('done: {task}')"}
+            res = run_block(setup_code, spec)
+            handles.append(res.value)
 
         comps = gather(handles)
         result = complete('%d of %d children completed'
@@ -153,6 +171,190 @@ def test_data_driven_fanout_via_synthesized_spawn_calls(runtime):
         "done: beta",
         "done: gamma",
     ]
+
+
+# --------------------------------------------------------------------------- #
+# run_code: the enforced snippet format
+# --------------------------------------------------------------------------- #
+
+
+def test_run_code_requires_snippet_format(runtime):
+    """A flat payload (the pre-format shape) is rejected as a value: the
+    Result names the required format, nothing is exec'd (no child, no
+    workspace pollution — validation fails before any exec), and the
+    parent's turn carries on."""
+    block = textwrap.dedent(
+        """
+        flat = "answer = spawn('flat child')"
+        res = run_block(flat)
+        state['probe_ok'] = res.ok
+        state['probe_reason'] = res.reason
+        result = complete('format enforced')
+        """
+    )
+    root = runtime.spawn("parent", driver=MockDriver.single(block))
+
+    comp = root.await_()
+    assert comp.status == AgentStatus.completed
+    assert comp.summary == "format enforced"
+
+    ws = runtime.repl_engine.globals_for(root.id)
+    assert ws["state"]["probe_ok"] is False
+    assert "def call(self, spec)" in ws["state"]["probe_reason"]
+
+    # Nothing ran: no child, and the payload never touched the workspace.
+    assert runtime.children_of(root.id) == []
+    assert "answer" not in ws
+
+
+@pytest.mark.parametrize(
+    "payload, reason_snippet",
+    [
+        pytest.param("x = 1", "no module-level 'call'", id="no-call-def"),
+        pytest.param(
+            "def call(agent):\n    return 1",
+            "first parameter 'self'",
+            id="wrong-self-name",
+        ),
+        pytest.param(
+            "def call(self, task):\n    return 1",
+            "second parameter 'spec'",
+            id="wrong-spec-name",
+        ),
+        pytest.param(
+            "def call(self, spec, extra):\n    return 1",
+            "at most (self, spec)",
+            id="too-many-params",
+        ),
+        pytest.param(
+            "def call(self, *args):\n    return 1",
+            "no *args/**kwargs",
+            id="varargs",
+        ),
+        pytest.param(
+            "def call(self):\n    return 1\n\n\ndef call(self):\n    return 2",
+            "exactly one",
+            id="duplicate-call",
+        ),
+        pytest.param(
+            "async def call(self):\n    return 1",
+            "plain (sync) function",
+            id="async-call",
+        ),
+        pytest.param("def call(self:\n    return 1", "SyntaxError", id="syntax"),
+    ],
+)
+def test_run_code_rejects_wrong_entrypoint_shapes(runtime, payload, reason_snippet):
+    """Each malformed entrypoint shape is rejected as a failed Result
+    whose reason names the specific violation — the format is enforced,
+    not advisory, and a rejected payload never executes."""
+    block = textwrap.dedent(
+        f"""
+        res = run_block({payload!r})
+        state['probe_ok'] = res.ok
+        state['probe_reason'] = res.reason
+        result = complete('rejected')
+        """
+    )
+    root = runtime.spawn("format guard", driver=MockDriver.single(block))
+
+    comp = root.await_()
+    assert comp.status == AgentStatus.completed
+    assert comp.summary == "rejected"
+
+    ws = runtime.repl_engine.globals_for(root.id)
+    assert ws["state"]["probe_ok"] is False
+    assert reason_snippet in ws["state"]["probe_reason"]
+    assert runtime.children_of(root.id) == []
+
+
+# --------------------------------------------------------------------------- #
+# run_code: the snippet sharing contract
+# --------------------------------------------------------------------------- #
+
+
+def test_run_code_sharing_contract_spec_state_and_locals(runtime):
+    """The snippet contract's three channels, pinned end to end: ``spec``
+    in (the call arguments), the return value out, and ``state`` for
+    persistence across successive run_code calls. Locals never leak into
+    the workspace; module-level helpers a payload defines are ordinary
+    workspace citizens."""
+    block = textwrap.dedent(
+        """
+        first = '''
+        def call(self, spec):
+            state['mark'] = spec
+            local_only = 'never leaks'
+            return state['mark']
+        '''
+        second = '''
+        def helper():
+            return 'helper ran'
+
+        def call(self):
+            return state['mark'] + ' / ' + helper()
+        '''
+        res1 = run_block(first, 'written by payload one')
+        res2 = run_block(second)
+        state['saw'] = res2.value
+        result = complete('contract pinned')
+        """
+    )
+    root = runtime.spawn("parent", driver=MockDriver.single(block))
+
+    comp = root.await_()
+    assert comp.status == AgentStatus.completed
+    assert comp.summary == "contract pinned"
+
+    ws = runtime.repl_engine.globals_for(root.id)
+    # spec in, return out.
+    assert ws["res1"].value == "written by payload one"
+    # state persists across run_code calls (the sanctioned channel).
+    assert ws["state"]["mark"] == "written by payload one"
+    # A module-level helper defined by a payload is a workspace citizen...
+    assert callable(ws["helper"])
+    # ...and its output flowed through the second payload's return value.
+    assert ws["res2"].value == "written by payload one / helper ran"
+    # Payload locals never leak into the workspace.
+    assert "local_only" not in ws
+
+
+def test_run_code_entrypoint_arities_and_none_return(runtime):
+    """Both entrypoint shapes work — ``def call(self)`` and ``def
+    call(self, spec)`` — and a payload whose entrypoint returns ``None``
+    falls back to the raw exec's Result (ok, no value) rather than
+    failing."""
+    block = textwrap.dedent(
+        """
+        no_args = '''
+        def call(self):
+            return 42
+        '''
+        with_spec = '''
+        def call(self, spec):
+            return spec * 2
+        '''
+        returns_none = '''
+        def call(self):
+            pass
+        '''
+        state['a'] = run_block(no_args).value
+        state['b'] = run_block(with_spec, 21).value
+        res = run_block(returns_none)
+        state['c'] = {'ok': res.ok, 'value': res.value}
+        result = complete('arities ok')
+        """
+    )
+    root = runtime.spawn("parent", driver=MockDriver.single(block))
+
+    comp = root.await_()
+    assert comp.status == AgentStatus.completed
+    assert comp.summary == "arities ok"
+
+    ws = runtime.repl_engine.globals_for(root.id)
+    assert ws["state"]["a"] == 42
+    assert ws["state"]["b"] == 42
+    assert ws["state"]["c"] == {"ok": True, "value": None}
 
 
 # --------------------------------------------------------------------------- #
@@ -301,14 +503,19 @@ def test_invoke_setup_helper_through_agent_tool(runtime):
 def test_typoed_synthesized_spawn_surfaces_in_result_and_spawns_nothing(
     runtime,
 ):
-    """A typo'd setup call (W3.9's ``namespce=``) composed into a
-    ``run_block`` probe surfaces as the returned Result's reason — the
-    did-you-mean text survives the composed path — and creates no child
-    while the parent's turn carries on."""
+    """A typo'd setup call (W3.9's ``namespce=``) composed into a run_code
+    snippet surfaces as the returned Result's reason when the entrypoint
+    is INVOKED — the did-you-mean text survives the composed path — and
+    creates no child while the parent's turn carries on."""
     block = textwrap.dedent(
         """
-        res = run_block("h = spawn('typo child', namespce={'x': 1})")
-        state['probe'] = {'ok': res.ok, 'reason': res.reason}
+        setup_code = '''
+        def call(self):
+            h = spawn('typo child', namespce={'x': 1})
+        '''
+        res = run_block(setup_code)
+        state['probe_ok'] = res.ok
+        state['probe_reason'] = res.reason
         result = complete('probe survived')
         """
     )
@@ -320,10 +527,9 @@ def test_typoed_synthesized_spawn_surfaces_in_result_and_spawns_nothing(
 
     # The did-you-mean TypeError is visible through the Result envelope.
     ws = runtime.repl_engine.globals_for(root.id)
-    probe = ws["state"]["probe"]
-    assert probe["ok"] is False
-    assert "namespce" in probe["reason"]
-    assert "did you mean 'namespace'" in probe["reason"]
+    assert ws["state"]["probe_ok"] is False
+    assert "namespce" in ws["state"]["probe_reason"]
+    assert "did you mean 'namespace'" in ws["state"]["probe_reason"]
 
     # Nothing was created by the failed setup call.
     assert runtime.children_of(root.id) == []
