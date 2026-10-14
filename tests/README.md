@@ -36,6 +36,23 @@ decision 0016 is visible here too: `framework/` tests the control loop,
 Filing rule: mirror by primary subject (the module's package is the test's
 directory). Cross-cutting files stay at the top.
 
+## The two mock seams
+
+The LLM boundary has two layers, and each has its own deterministic double:
+
+- **Script the driver** (`MockDriver`) — the whole decision loop becomes a
+  fixed list of code blocks, delivered verbatim (no prompt assembly,
+  parsing, or usage recording in between). Use it when the *runtime
+  mechanics* are under test (spawn/join, workspaces, tree attribution):
+  `test_integration`, `test_subagent_setup`, `test_repl_boundary`. This is
+  also the no-key runtime mode (demo, benchmark default, quickstart).
+- **Fake the client** (`LLMDriver(client=MockLLM(...))`, or a spy client
+  like the `_UsageClient` in `test_token_cost`) — the *real* driver runs
+  against a deterministic client, so prompt assembly, parsing, containment,
+  and usage recording stay in the loop. Use it when the driver pipeline
+  itself is under test: `test_prompt_assembly`, `test_token_cost`,
+  `test_rot_policy`, `test_context`.
+
 ## Baseline
 
 Current baseline (post-restructure, commit 1): **394 passed / 0 failed /

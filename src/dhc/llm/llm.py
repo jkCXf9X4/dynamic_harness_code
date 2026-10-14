@@ -540,6 +540,12 @@ class MockLLM:
       substring of the prompt selects the block; otherwise *default* is used.
     * callable: ``fn(prompt, context) -> str`` — full control.
 
+    This fakes the *client* (the LLM call), so it pairs with the real
+    :class:`~dhc.llm.driver.LLMDriver`: prompt assembly, parsing, usage
+    recording, and failure containment still run. To replace the whole
+    decision loop instead, use :class:`~dhc.llm.driver.MockDriver` at the
+    driver layer.
+
     Same interface as :class:`LLMClient`; never touches the network. Markdown
     fences are stripped from returned blocks, matching :class:`LLMClient`.
     """

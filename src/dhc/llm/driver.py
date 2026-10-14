@@ -307,7 +307,21 @@ class LLMDriver:
 
 
 class MockDriver:
-    """Deterministic driver for tests and demos.
+    """Deterministic driver for tests and demos — the scripted *brain*.
+
+    A driver decides what code an agent runs next; the LLM boundary sits
+    one layer below it, in the client that :class:`LLMDriver` calls.
+    MockDriver replaces the whole brain with a fixed script: no prompt
+    assembly, no client call, no parsing, no usage recording — the agent
+    is never consulted. Script the driver when the runtime mechanics are
+    under test (spawn/join, workspaces, tree attribution); inject a fake
+    client (e.g. :class:`~dhc.llm.MockLLM`) into the real driver when
+    the driver pipeline itself is.
+
+    It is also the no-key runtime mode, not just a test double:
+    :func:`driver_from_settings` returns it when ``mock=True`` or no API
+    key is configured, so the demo, the benchmark default, and the
+    quickstart all run offline through it.
 
     ``script`` is a list of code blocks; they are returned in order, then
     ``None`` (settle). :meth:`single` builds a one-block driver.
