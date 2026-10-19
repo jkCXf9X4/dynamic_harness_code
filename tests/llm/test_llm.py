@@ -8,6 +8,7 @@ injected fake openai client (timeout containment) or never constructed
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import httpx
 import openai
@@ -16,7 +17,12 @@ import pytest
 import dhc.data.config as config_mod
 from dhc import errors
 from dhc.data.config import merge_api_key
-from dhc.llm.driver import LLMDriver, MockDriver, driver_from_settings
+from dhc.llm.driver import (
+    EMPTY_COMPLETION_RETRIES,
+    LLMDriver,
+    MockDriver,
+    driver_from_settings,
+)
 from dhc.llm.llm import (
     ContextRotDetector,
     LLMClient,
@@ -678,3 +684,137 @@ class TestDriverFromSettingsProvider:
         )
         assert mock.available() is True
         mock.close()
+
+
+# --------------------------------------------------------------------------- #
+# INFO-020 hardening — empty completion + turn cap fail diagnostically
+# --------------------------------------------------------------------------- #
+
+
+class _ScriptClient:
+    """Fake LLM client returning a fixed sequence of blocks (None = settle
+    signal, the scripted-client contract), with a call counter."""
+
+    def __init__(self, blocks):
+        self._blocks = list(blocks)
+        self.calls = 0
+
+    def generate_code_block(self, prompt, context):
+        self.calls += 1
+        if self.calls > len(self._blocks):
+            return None
+        return self._blocks[self.calls - 1]
+
+
+def _bare_agent():
+    from dhc.framework.agent import Agent
+
+    return Agent(id="a1", requirement="req")
+
+
+class TestEmptyCompletionFailsDiagnostically:
+    def test_empty_completion_fails_with_diagnostic_reason(self):
+        """A client that always returns blank blocks: the driver retries
+        in-call (EMPTY_COMPLETION_RETRIES), then returns a fail() block
+        naming the cause — never a silent None settle."""
+        agent = _bare_agent()
+        client = _ScriptClient(["", "   ", "\n"])
+        driver = LLMDriver(client)
+        code = driver(agent)
+        assert code is not None
+        assert "empty completion after" in code
+        assert "fail(" in code
+        # Bounded: one initial call + EMPTY_COMPLETION_RETRIES retries.
+        assert client.calls == 1 + EMPTY_COMPLETION_RETRIES
+        # The fail-once pattern: the next call settles (None), it does not
+        # keep retrying or looping.
+        assert driver(agent) is None
+
+    def test_retry_recovers_non_empty_block(self):
+        """A blank block followed by a real one: the retry succeeds, the
+        block is returned normally, and the retries did not consume the
+        turn cap (one __call__ = one turn)."""
+        agent = _bare_agent()
+        client = _ScriptClient(["", "x = 1\n"])
+        driver = LLMDriver(client, max_turns=1)
+        assert driver(agent) == "x = 1\n"
+        assert client.calls == 2  # one blank + one retry
+        # The retry did not consume the cap: the next call is the cap, not
+        # an early settle.
+        code = driver(agent)
+        assert code is not None
+        assert "turn cap reached" in code
+
+    def test_none_return_still_settles(self):
+        """A scripted client returning None (script exhausted) still settles
+        the agent — None remains the documented settle signal, distinct
+        from a blank-block completion."""
+        agent = _bare_agent()
+        client = _ScriptClient(["complete('done')\n"])
+        driver = LLMDriver(client)
+        assert driver(agent) == "complete('done')\n"
+        assert driver(agent) is None
+
+
+class TestTurnCapFailsDiagnostically:
+    def test_cap_fails_with_reason_naming_the_cap(self):
+        """Cap exhaustion returns a fail() block naming the cap (distinct
+        from a model stop), then settles on the next call."""
+        agent = _bare_agent()
+        client = _ScriptClient(["x = 1\n"] * 10)
+        driver = LLMDriver(client, max_turns=2)
+        assert driver(agent) == "x = 1\n"
+        assert driver(agent) == "x = 1\n"
+        code = driver(agent)
+        assert code is not None
+        assert "turn cap reached" in code
+        assert "2/2" in code
+        assert "fail(" in code
+        # Fail-once: the next call settles.
+        assert driver(agent) is None
+
+    def test_cap_does_not_shadow_prior_failure(self):
+        """A client failure followed by cap exhaustion: the failure settles
+        first (the _failed_once check runs before the cap check, so a
+        fail-once agent cannot be re-failed by the cap)."""
+        agent = _bare_agent()
+
+        class _Boom:
+            def generate_code_block(self, prompt, context):
+                raise RuntimeError("boom")
+
+        driver = LLMDriver(_Boom(), max_turns=1)
+        first = driver(agent)
+        assert first is not None and "LLM call failed" in first
+        assert driver(agent) is None  # settles, not re-failed by the cap
+
+
+class TestDriverFromSettingsMaxTurns:
+    def test_plumbs_max_turns_from_agent_config(self, monkeypatch):
+        """driver_from_settings reads settings.config.agent.max_turns and
+        passes it to LLMDriver (harness.json agent.max_turns -> LLMDriver)."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        settings = config_mod.Settings(
+            workspace_root=Path("/tmp"),
+            artifact_root=Path("/tmp"),
+            config=config_mod.HarnessConfig(
+                agent=config_mod.AgentConfig(max_turns=7)
+            ),
+        )
+        driver = driver_from_settings(settings, mock=False)
+        assert isinstance(driver, LLMDriver)
+        assert driver._max_turns == 7
+
+    def test_default_max_turns_is_20(self, monkeypatch):
+        """Backward compatibility: with no agent.max_turns configured, the
+        driver keeps the historical default cap of 20."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        driver = driver_from_settings(mock=False)
+        assert isinstance(driver, LLMDriver)
+        assert driver._max_turns == 20
+
+    def test_agent_config_default_is_20(self):
+        """The AgentConfig field default is 20 (the constructor default and
+        the config default agree)."""
+        assert config_mod.AgentConfig().max_turns == 20
+        assert config_mod.HarnessConfig().agent.max_turns == 20

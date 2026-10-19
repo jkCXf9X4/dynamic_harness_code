@@ -32,7 +32,8 @@
     "references_dir": null,
     "skills_dir": null,
     "active_turn_window": 50,
-    "stream_children": true
+    "stream_children": true,
+    "max_turns": 20
   },
   "communication": {
     "topology": "off",

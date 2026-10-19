@@ -127,6 +127,16 @@ class AgentConfig(BaseModel):
     skills_dir: str | None = None
     active_turn_window: int = Field(default=50, ge=1)
     stream_children: bool = True
+    max_turns: int = Field(
+        default=20, ge=1,
+        description="Driver-level turn cap: the maximum number of code "
+                    "blocks one agent may produce before the driver fails "
+                    "the agent with a 'turn cap reached' reason. This is the "
+                    "per-agent block ceiling (LLMDriver), NOT "
+                    "max_turn_seconds (the per-step duration watchdog) and "
+                    "NOT max_iterations (the run-level iteration ceiling in "
+                    "the safety section).",
+    )
 
 
 class CommunicationConfig(BaseModel):

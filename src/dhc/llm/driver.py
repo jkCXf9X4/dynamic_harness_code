@@ -11,7 +11,9 @@ Two drivers are provided:
   (``client.generate_code_block(prompt, context) -> str``) for the next
   block. Resilient per INFO-020: a client failure returns a block that calls
   ``fail(reason)`` so the turn settles failed rather than hanging; an empty
-  block or the turn cap settles the agent.
+  block is retried in-call (bounded by :data:`EMPTY_COMPLETION_RETRIES`) and
+  fails diagnostically when exhausted; the turn cap fails with a reason
+  naming the cap.
 * :class:`MockDriver` — the deterministic mock path for tests and demos: a
   scripted list of code blocks returned in order, then ``None``.
 
@@ -66,6 +68,14 @@ DEFAULT_SCRIPT: list[str] = [
     "art = publish('hello', 'summary', 'report body')\n"
     "result = complete('done', artifacts=[art.id])\n"
 ]
+
+#: Bounded in-call retries for an empty completion (INFO-020 hardening): a
+#: blank block is retried this many times within ONE ``__call__`` before the
+#: driver gives up and returns a ``fail(...)`` block with a diagnostic reason.
+#: Retries never consume the turn cap (``_turns`` counts ``__call__``s, not
+#: client calls) and never re-settle silently: exhaustion is a diagnosable
+#: failure, not a silent "no result" settle.
+EMPTY_COMPLETION_RETRIES: int = 2
 
 
 def _workspace_context(runtime: Any, agent_id: str) -> Optional[Any]:
@@ -141,13 +151,14 @@ class LLMDriver:
     - ``system_prompt`` — optional extra system guidance prepended to the
       prompt.
     - ``max_turns`` — the turn cap; after this many driver calls the agent is
-      told to settle (``None``).
+      told to fail with a reason naming the cap (then settle).
     - ``rot_detector`` — optional :class:`~dhc.llm.ContextRotDetector`; each
       generated block is scored and a warning is logged on rot (INFO-021).
 
     ``__call__(agent) -> str | None`` returns the next code block, or ``None``
-    when the agent should settle. Resilient (INFO-020): a client failure
-    returns a block that calls ``fail(reason)`` so the turn settles failed
+    when the agent should settle. Resilient (INFO-020): a client failure, an
+    empty completion (after bounded in-call retries), or the turn cap each
+    return a block that calls ``fail(reason)`` so the turn settles failed
     rather than hanging; the next call settles.
 
     Prompt assembly is workspace-swappable (G-02): ``_build_prompt`` first
@@ -172,28 +183,60 @@ class LLMDriver:
         self._failed_once = False
 
     def __call__(self, agent: Any) -> Optional[str]:
-        if self._turns >= self._max_turns:
-            return None
         if self._failed_once:
-            # A previous client failure already produced a fail() turn; settle
-            # now so the agent settles failed instead of looping.
+            # A previous failure already produced a fail() turn; settle now so
+            # the agent settles failed instead of looping.
             return None
+        if self._turns >= self._max_turns:
+            # Cap exhaustion is a diagnosable failure, not a silent settle:
+            # return a fail() block naming the cap (distinct from a model
+            # stop), then settle on the next call (the fail-once pattern).
+            self._failed_once = True
+            reason = f"turn cap reached: {self._turns}/{self._max_turns} turns"
+            logger.warning("LLMDriver turn cap for agent %s: %s", agent.id, reason)
+            return f"fail({json.dumps(reason)})"
         self._turns += 1
         prompt = self._build_prompt(agent)
         context = self._recent_context(agent)
-        try:
-            code = self._client.generate_code_block(prompt, context)
-        except Exception as exc:  # noqa: BLE001 - any client failure is contained
+        # Bounded in-call retry for an empty completion (INFO-020 hardening):
+        # a blank block is retried within this same __call__ (retries never
+        # consume the turn cap) and, when all attempts come back blank, the
+        # driver returns a fail() block with a diagnostic reason instead of
+        # settling silently with "no result". ``None`` is NOT an empty
+        # completion: it is the scripted-client settle signal (a real
+        # :class:`~dhc.llm.LLMClient` raises on an empty response instead of
+        # returning None), so it still settles immediately.
+        empty_retries = 0
+        while True:
+            try:
+                code = self._client.generate_code_block(prompt, context)
+            except Exception as exc:  # noqa: BLE001 - any client failure is contained
+                self._failed_once = True
+                reason = f"LLM call failed: {type(exc).__name__}: {exc}"
+                logger.warning("LLMDriver client failure for agent %s: %s", agent.id, reason)
+                return f"fail({json.dumps(reason)})"
+            if code is None:
+                # Settle: no block was produced, so no usage is attributed.
+                # (Recording here would re-count the client's stale _last_usage
+                # from the previous call — usage is attributed to the block that
+                # was actually produced, not to the settle probe.)
+                return None
+            if code.strip() or empty_retries >= EMPTY_COMPLETION_RETRIES:
+                break
+            empty_retries += 1
+            logger.warning(
+                "LLMDriver empty completion for agent %s (attempt %d/%d); retrying",
+                agent.id,
+                empty_retries,
+                EMPTY_COMPLETION_RETRIES + 1,
+            )
+        if not code.strip():
+            # All attempts came back blank: fail diagnostically (the
+            # fail-once pattern — the next call settles), never silently.
             self._failed_once = True
-            reason = f"LLM call failed: {type(exc).__name__}: {exc}"
-            logger.warning("LLMDriver client failure for agent %s: %s", agent.id, reason)
+            reason = f"empty completion after {EMPTY_COMPLETION_RETRIES + 1} attempts"
+            logger.warning("LLMDriver empty completion for agent %s: %s", agent.id, reason)
             return f"fail({json.dumps(reason)})"
-        if not code or not code.strip():
-            # Settle: no block was produced, so no usage is attributed.
-            # (Recording here would re-count the client's stale _last_usage
-            # from the previous call — usage is attributed to the block that
-            # was actually produced, not to the settle probe.)
-            return None
         # The ONE write seam (IMP-004): provider usage flows into agent
         # state here — the only place that holds both the agent and the
         # client that just produced the block. The client records the
@@ -363,6 +406,10 @@ def driver_from_settings(
     ``rot_detector`` — optional :class:`~dhc.llm.ContextRotDetector`; when
     wired, each generated block is scored and a warning is logged on rot
     (INFO-021). Observe-only: it never prunes.
+
+    The turn cap comes from ``settings.config.agent.max_turns``
+    (:class:`~dhc.data.config.AgentConfig`, default 20) — the driver-level
+    ceiling on how many blocks one agent may produce.
     """
     if settings is None:
         settings = get_settings()
@@ -376,4 +423,8 @@ def driver_from_settings(
         timeout_seconds=provider_cfg.call_timeout_seconds,
         base_url=provider_cfg.base_url,
     )
-    return LLMDriver(client, rot_detector=rot_detector)
+    return LLMDriver(
+        client,
+        max_turns=settings.config.agent.max_turns,
+        rot_detector=rot_detector,
+    )
