@@ -38,3 +38,4 @@ status: current
 - Direct point-to-point messaging — `INFO-015`.
 - Pull-based artifact consumption, delivering content on demand without a room — `INFO-006`.
 - Broadcast of one requirement to spawned children, a delegation pattern — `INFO-013`.
+- The `room()` snapshot crossing, membership and posting gate left to RoomManager — `INFO-072`.

@@ -19,7 +19,7 @@ status: current
   - The runtime injects none of it.
 
 ## Owns
-- The per-turn V-model discipline enforced on every action.
+- The per-turn V-model discipline the agent performs on every action.
 
 ## Excludes
 - Execution and persistence of the block — `INFO-002`.

@@ -34,7 +34,9 @@ This boundary is orthogonal to it, fixed by `AD-008`, refined by `AD-009`: **wha
   - Data the core only carries opaquely, so someone can persist, observe, or render it: tooling.
   - Semantics the core interprets, or the directed-message relay itself: framework.
 - **Worked example: rot detection (`INFO-021`).**
-  - Framework: the pump-side tripwire and policy semantics; the core interprets the report.
+  - Framework: the pump-side tripwire and its enforcement surface.
+  - Policy content is agent-owned (`INFO-074`).
+  - The core interprets the report.
   - Composed: the scoring detector lives with the LLM driver (`dhc.llm`), attached at the composition root.
 - **Worked example: artifact contract.**
   - Its *vocabulary* is framework: the content-addressed `Artifact` model, the disclosure tiers, the `artifact_published` event.

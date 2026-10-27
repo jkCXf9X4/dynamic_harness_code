@@ -2,7 +2,7 @@
 id: INFO-023
 type: info
 title: Ask the operator a question
-summary: Any agent can ask the operator a question; the question routes up the parent chain and the answer returns to the asking agent
+summary: Any agent can ask the operator a question; the question goes to the operator channel and the answer returns to the asking agent
 date: 2026-10-05
 status: current
 ---
@@ -10,14 +10,14 @@ status: current
 # Ask the operator a question
 
 - **Any agent can ask**
-  - Any agent, not just root, can ask operator a question.
-  - Question routes up parent chain to root, crosses to operator (`INFO-014`).
+  - Any agent, not just root, can ask the operator a question.
+  - The question goes to the operator channel, not up the parent chain (`INFO-014`).
 - **Attribution and reply**
-  - Operator sees question attributed to asking agent.
-  - Answer routes back down same chain to asking agent.
+  - The operator sees the question attributed to the asking agent.
+  - The answer is addressed to the asking agent, on its own stream.
 - **One carve-out**
-  - Operator invisible to inner agents, except this (`INFO-017`).
-  - Boundary stays single door through root.
+  - The operator is invisible to inner agents, except this channel (`INFO-017`).
+  - Escalation is the only path that climbs the parent chain.
 - **Asking is normal, not failure**
   - Escalation reports failed result to parent instead (`INFO-011`).
 - **Boundary (decision `AD-009`)**

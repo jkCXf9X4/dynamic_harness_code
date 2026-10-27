@@ -25,3 +25,4 @@ status: current
 - Blocking synchronization — `INFO-031`.
 - Completion callbacks, which push notification instead of pulling — `INFO-033`.
 - The provenance trail that records the same transitions — `INFO-027`.
+- The `Poll` yield outcome that returns without parking — `INFO-062`.

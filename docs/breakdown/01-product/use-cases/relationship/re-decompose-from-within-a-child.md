@@ -29,3 +29,4 @@ status: current
 - The decomposition contract this extends — `INFO-004`.
 - Pre-execution fan-out with a fixed tree — `INFO-009`.
 - Escalation instead of re-decomposition — `INFO-011`.
+- How a child's own nested completions are dispatched between its actions — `INFO-047`.

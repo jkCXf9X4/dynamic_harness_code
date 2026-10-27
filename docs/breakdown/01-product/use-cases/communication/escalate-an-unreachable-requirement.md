@@ -27,3 +27,4 @@ status: current
 - Crash containment and failure surfacing, which this rides on — `INFO-005`.
 - Parent-side remedy: re-decomposition — `INFO-010`.
 - Pre-execution fan-out where criteria are fixed — `INFO-009`.
+- The composition that wires the escalation channel — `INFO-058`.

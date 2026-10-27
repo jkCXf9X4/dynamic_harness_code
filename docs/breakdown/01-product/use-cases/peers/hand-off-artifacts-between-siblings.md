@@ -26,3 +26,4 @@ status: current
 ## Excludes
 - Parent-mediated reporting, default route — `INFO-006`.
 - Static fan-out, which forbids child-to-child communication — `INFO-009`.
+- The facade send and sibling-id discipline the handoff crosses — `INFO-072`.

@@ -13,12 +13,23 @@ Cap names (the crash-event payload keys, :data:`CAP_NAMES`): ``wall_clock``,
 Deprecated settings-style spellings (``max_iterations``, ``timeout_seconds``,
 ``max_children``, ``max_agents``, ...) are accepted as budget keys via the
 single :data:`ALIASES` table and emit a :class:`DeprecationWarning` (W5.2).
+
+``workspace_bytes`` measures two sources: the serialized size of the agent's
+REPL state, and the files it added or grew on disk. The filesystem half is
+counted ONLY when a workspace root is configured explicitly
+(``DHC_WORKSPACE_ROOT`` / ``Settings.workspace_root_explicit``): the implicit
+cwd default is the interpreter's directory, not the agent's workspace, so it is
+never scanned. Configure a workspace root to have files count against the cap.
+Each scan is bounded (entry count, depth, a 250 ms deadline) and pruned; a
+truncated scan reports the bytes counted so far and never forces a cap hit.
 """
 
 from __future__ import annotations
 
+import os
 import time
 import warnings
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from ..data.config import SafetyConfig
@@ -52,6 +63,50 @@ _DEFAULT_MAX_WORKSPACE_BYTES = 1 << 20  # 1 MiB
 #: Message-rate cap is disabled by default; enforced only when settings
 #: provide ``max_messages_per_step``.
 _DEFAULT_MAX_MESSAGES_PER_STEP = None
+
+#: Directories never counted as workspace footprint: VCS metadata,
+#: dependencies, caches and the runtime's own artifact tree. Pruning them
+#: keeps the per-step walk cheap and stops the harness's own bookkeeping (or
+#: a checked-out dependency tree) from tripping the ceiling.
+_WORKSPACE_PRUNE = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "env",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        "site-packages",
+        ".dynamic-harness",
+        "dist",
+        "build",
+    }
+)
+
+#: Bound on the per-step walk (the cost chosen): at most this many filesystem
+#: entries are visited, nesting deeper than :data:`_WORKSPACE_MAX_DEPTH` is not
+#: descended, and a scan running longer than
+#: :data:`_WORKSPACE_SCAN_DEADLINE_SECONDS` stops early. Truncation never
+#: forces a cap hit: the bytes counted so far are reported, plus a flag.
+_WORKSPACE_MAX_ENTRIES = 4096
+_WORKSPACE_MAX_DEPTH = 32
+_WORKSPACE_SCAN_DEADLINE_SECONDS = 0.25
+
+#: Per-root baseline snapshot ``{path: size}`` taken at the FIRST measurement
+#: for that root; only files added or grown since then are counted (see
+#: :func:`workspace_file_bytes`).
+_WORKSPACE_BASELINES: dict[str, dict[str, int]] = {}
+#: Roots whose baseline scan hit the deadline: accounting is off for them
+#: (a partial baseline would count pre-existing files as growth).
+_WORKSPACE_UNMEASURABLE: dict[str, bool] = {}
+#: Last-scan truncation flag per root (:func:`workspace_scan_truncated`).
+_WORKSPACE_TRUNCATED: dict[str, bool] = {}
 
 
 class ConfigResolver:
@@ -233,6 +288,129 @@ def clamp_limit(ceiling: Any, budget: Any) -> tuple:
     return ceiling, "ceiling"
 
 
+def _workspace_root(settings: Any) -> Optional[str]:
+    """The explicitly configured workspace directory, absolute, or None.
+
+    Only an EXPLICITLY configured root is scanned (``DHC_WORKSPACE_ROOT``, via
+    ``Settings.workspace_root_explicit``): the implicit cwd default belongs to
+    the interpreter, not to the agent, and walking it on every step is both
+    wrong and expensive. No environment is read here.
+    """
+    if not getattr(settings, "workspace_root_explicit", False):
+        return None
+    root = getattr(settings, "workspace_root", None)
+    if root is None:
+        return None
+    try:
+        directory = Path(os.path.abspath(str(root)))
+        return str(directory) if directory.is_dir() else None
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _scan_workspace(root: str) -> tuple:
+    """``({path: size}, truncated)`` for the files under *root*.
+
+    Bounded on three axes — entry count, nesting depth and wall-clock
+    deadline — and pruned (:data:`_WORKSPACE_PRUNE`), so a step never pays for
+    an unbounded recursive walk.
+    """
+    sizes: dict = {}
+    stack = [(root, 0)]
+    seen = 0
+    truncated = False
+    started = time.monotonic()
+    while stack:
+        if (
+            seen >= _WORKSPACE_MAX_ENTRIES
+            or time.monotonic() - started > _WORKSPACE_SCAN_DEADLINE_SECONDS
+        ):
+            truncated = True
+            break
+        directory, depth = stack.pop()
+        try:
+            with os.scandir(directory) as iterator:
+                entries = list(iterator)
+        except OSError:
+            continue
+        for entry in entries:
+            seen += 1
+            if seen > _WORKSPACE_MAX_ENTRIES:
+                truncated = True
+                break
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    pruned = entry.name in _WORKSPACE_PRUNE
+                    if depth < _WORKSPACE_MAX_DEPTH and not pruned:
+                        stack.append((entry.path, depth + 1))
+                elif entry.is_file(follow_symlinks=False):
+                    sizes[entry.path] = entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                continue
+    return sizes, truncated
+
+
+def reset_workspace_baseline(root: Any = None) -> None:
+    """Forget the footprint baseline — every root, or just *root*."""
+    if root is None:
+        _WORKSPACE_BASELINES.clear()
+        _WORKSPACE_UNMEASURABLE.clear()
+        _WORKSPACE_TRUNCATED.clear()
+        return
+    try:
+        key = os.path.abspath(str(root))
+    except (TypeError, ValueError):
+        return
+    _WORKSPACE_BASELINES.pop(key, None)
+    _WORKSPACE_UNMEASURABLE.pop(key, None)
+    _WORKSPACE_TRUNCATED.pop(key, None)
+
+
+def workspace_scan_truncated(settings: Any) -> bool:
+    """True when the last footprint scan for this root stopped early."""
+    root = _workspace_root(settings)
+    return bool(_WORKSPACE_TRUNCATED.get(root, False)) if root else False
+
+
+def workspace_file_bytes(settings: Any) -> int:
+    """Bytes the agent ADDED or GREW in its explicitly configured workspace.
+
+    The filesystem half of the ``workspace_bytes`` cap — REPL state is counted
+    separately. The first call for a root records a baseline snapshot (so
+    pre-existing project files never trip the ceiling); later calls count files
+    absent from the baseline plus the growth of files the agent enlarged. A
+    truncated scan reports the bytes counted so far (never a forced trip), and
+    a baseline too large to snapshot within the deadline disables accounting
+    for that root rather than counting everything as growth. Never raises: an
+    unreadable tree measures as zero.
+    """
+    try:
+        root = _workspace_root(settings)
+        if root is None:
+            return 0
+        if _WORKSPACE_UNMEASURABLE.get(root):
+            return 0
+        baseline = _WORKSPACE_BASELINES.get(root)
+        current, truncated = _scan_workspace(root)
+        _WORKSPACE_TRUNCATED[root] = truncated
+        if baseline is None:
+            if truncated:
+                _WORKSPACE_UNMEASURABLE[root] = True
+                return 0
+            _WORKSPACE_BASELINES[root] = current
+            return 0
+        grown = 0
+        for path, size in current.items():
+            previous = baseline.get(path)
+            if previous is None:
+                grown += size
+            elif size > previous:
+                grown += size - previous
+        return grown
+    except Exception:  # noqa: BLE001 - sizing is best-effort
+        return 0
+
+
 def cap_hit(
     agent_id: str,
     engine: Any,
@@ -264,6 +442,10 @@ def cap_hit(
     lock, the event-bus drain) and are invoked only when the corresponding
     cap is enabled — the drain must NOT run when the message-rate cap is
     disabled, or pending events would be consumed.
+
+    The ``workspace_bytes`` footprint sums two sources: the serialized size
+    of the agent's REPL state and the bytes it added/grew on disk in its
+    writable directory (see :func:`workspace_file_bytes`).
     """
     budgets = agent_budgets(engine, agent_id)
     resolver = ConfigResolver(settings)
@@ -296,7 +478,9 @@ def cap_hit(
     if max_children is not None:
         if child_count() >= max_children:
             return {"cap": "children", "limit": max_children, "source": child_src}
-    # Workspace bytes (runtime default unless settings provide one).
+    # Workspace bytes (runtime default unless settings provide one): the
+    # agent's REPL state plus the files it added/grew in its writable
+    # directory — files written through ``bash`` count too.
     max_workspace_bytes, ws_src = clamp_limit(
         resolver.resolve("workspace_bytes"),
         budgets.get("workspace_bytes"),
@@ -304,9 +488,10 @@ def cap_hit(
     if max_workspace_bytes is not None:
         try:
             ws = engine.globals_for(agent_id)
-            size = sum(len(str(v)) for v in ws.values())
+            repl_bytes = sum(len(str(v)) for v in ws.values())
         except Exception:  # noqa: BLE001 - sizing is best-effort
-            size = 0
+            repl_bytes = 0
+        size = repl_bytes + workspace_file_bytes(settings)
         if size > max_workspace_bytes:
             return {
                 "cap": "workspace_bytes",

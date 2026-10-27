@@ -21,7 +21,9 @@ other wiring-level attributes.
 * :class:`~dhc.repl.ReplEngine` — per-agent persistent REPL (INFO-050)
 * :class:`~dhc.event_stream.EventBus` with the
   :class:`~dhc.tooling.BoundaryEventLog` as its persist sink (INFO-049)
-* :class:`~dhc.event_stream.CompletionDispatcher` — at-most-once (INFO-046)
+* :class:`~dhc.event_stream.CompletionDispatcher` — at-most-once (INFO-046);
+  settlements persist through the artifact store, so an undelivered
+  settlement survives a restart and is replayed once
 * :class:`~dhc.tooling.ArtifactStore` — content-addressed (INFO-006)
 * the communication channels (Messenger, RoomManager, EscalationChannel,
   OperatorQuestionChannel) on the same bus — operator tooling (0015)
@@ -119,8 +121,8 @@ class _ReplEngineAdapter:
     """Translate the ReplEngine's Result-returning contract into the
     runtime's raising contract.
 
-    The committed runtime catches ``TurnTimeoutError`` (-> timeout terminal)
-    and ``Exception`` (-> failed terminal) from ``engine.execute``. The real
+    The committed runtime settles both ``TurnTimeoutError`` and ``Exception``
+    as a failed terminal from ``engine.execute``. The real
     ReplEngine never raises: it returns a failed :class:`~dhc.models.Result`
     both when the code raised (contained, INFO-005) and when the agent
     deliberately called ``fail()``. This adapter re-raises only the former —
@@ -299,7 +301,9 @@ def build_runtime(
     OperatorQuestionChannel) — all on the same bus. The channels are exposed
     as ``runtime.messenger``, ``runtime.rooms``, ``runtime.escalations``,
     ``runtime.questions``; the operator door as ``runtime.operator``; the
-    dispatcher as ``runtime.dispatcher``; the boundary log as
+    the dispatcher as ``runtime.dispatcher`` (durable: its settlement sink is
+    the same artifact store, so undelivered settlements survive a restart);
+    the boundary log as
     ``runtime.boundary_log``; the store adapter as ``runtime.artifact_store``
     (the historical ``runtime.artifact_store_real`` name is a deprecated
     property forwarding to it) — wiring-level decorations attached after
@@ -332,8 +336,12 @@ def build_runtime(
     boundary_log = BoundaryEventLog(root)
     sink = BoundarySink(boundary_log)
     bus = EventBus(sink=sink)
-    dispatcher = CompletionDispatcher()
     store_adapter = StoreAdapter(store)
+    # The dispatcher persists settlements through the same artifact store the
+    # rest of the composition root uses (no second storage layer): a
+    # settlement is durable before it is acknowledged, and a fresh dispatcher
+    # over this store replays only undelivered settlements.
+    dispatcher = CompletionDispatcher(sink=store_adapter)
 
     runtime = WiredRuntime(
         engine=None,  # wired below (needs the runtime for agent resolution)

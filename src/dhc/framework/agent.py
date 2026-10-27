@@ -37,6 +37,8 @@ primitive on the agent itself: :meth:`Agent.send` delegates to
 from __future__ import annotations
 
 import difflib
+import os
+import signal
 import subprocess
 import time
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
@@ -78,24 +80,70 @@ def _tool_output(callable: Callable[..., Any], *args: Any, **kwargs: Any) -> Too
 
 
 def bash(cmd: str, timeout: float = 30.0) -> str:
-    """A simple subprocess wrapper returning the captured output as text."""
+    """Run *cmd* in a new process group, returning the captured output.
+
+    The command is a session leader (``start_new_session=True``) so the
+    whole tree it spawns can be killed with ``SIGKILL`` — on timeout, on a
+    cancel request, or on any wait error. Polling a cancel predicate (bound
+    by the REPL engine to the runtime stop flag) means a running turn's
+    blocking external call dies at the next boundary instead of orphaning
+    its children and running to the step timeout.
+    """
+    # Imported lazily: the engine hook is only needed while a turn runs.
+    from .repl import cancel_requested
+
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             shell=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired as exc:
-        return f"TimeoutError: command timed out after {timeout}s"
     except Exception as exc:  # noqa: BLE001
         return f"{type(exc).__name__}: {exc}"
-    out = proc.stdout or ""
+    deadline = time.monotonic() + timeout
+    out = err = ""
+    while True:
+        cancelled = cancel_requested()
+        remaining = deadline - time.monotonic()
+        if cancelled or remaining <= 0:
+            _kill_process_group(proc)
+            try:
+                proc.communicate(timeout=1.0)
+            except Exception:  # noqa: BLE001 - pipes closed under the kill
+                pass
+            if cancelled:
+                return "CancelledError: command cancelled"
+            return f"TimeoutError: command timed out after {timeout}s"
+        try:
+            # Short slices: repeated communicate() calls keep already-read
+            # output, so polling loses nothing and cannot deadlock on a full
+            # pipe buffer.
+            out, err = proc.communicate(timeout=min(0.05, remaining))
+            break
+        except subprocess.TimeoutExpired:
+            continue
+        except Exception as exc:  # noqa: BLE001
+            _kill_process_group(proc)
+            return f"{type(exc).__name__}: {exc}"
+    out = out or ""
     if proc.returncode != 0:
-        err = proc.stderr or ""
+        err = err or ""
         return f"exit {proc.returncode}\n{out}\n{err}".strip()
     return out
+
+
+def _kill_process_group(proc: "subprocess.Popen") -> None:
+    """SIGKILL *proc*'s whole process group (fall back to the process)."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001 - already gone
+            pass
 
 
 # --------------------------------------------------------------------------- #

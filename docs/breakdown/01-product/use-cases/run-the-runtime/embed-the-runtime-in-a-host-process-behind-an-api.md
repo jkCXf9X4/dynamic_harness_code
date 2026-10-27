@@ -27,3 +27,4 @@ status: draft
 - Agent-developed tools — `INFO-007`.
 - Operator-to-root door — `INFO-017`.
 - Container hosting of runtime — `INFO-008`.
+- The `build_runtime` entry point and exposed surfaces a host constructs through — `INFO-058`.

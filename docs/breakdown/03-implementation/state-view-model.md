@@ -10,7 +10,7 @@ status: current
 # State view model
 
 - `src/dhc/ui/state.py` builds the operator's review files from the live runtime.
-  - Review files: `agents.txt`, `stats.json`, `events.jsonl`, `trace.jsonl`.
+  - Review files: `agents.txt`, `stats.json`, `events.jsonl`.
 - **Peripheral view-model**:
   - Contract (module docstring): "must never crash a snapshot".
   - So `on_event` never raises on an unknown kind.

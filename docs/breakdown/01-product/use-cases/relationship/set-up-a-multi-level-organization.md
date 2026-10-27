@@ -48,3 +48,4 @@ status: current
   - This leaf owns only their multi-level composition.
 - **Re-decomposition within one agent** (`INFO-010`).
   - A lead's re-decomposition happens inside the group structure it was given.
+- Per-agent execution placement, identical at every level — `INFO-038`.

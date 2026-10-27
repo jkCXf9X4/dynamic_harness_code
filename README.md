@@ -1,14 +1,13 @@
 # dhc — Dynamic Harness Code
 
 A **recursive agent runtime** where every agent turn is **one Python block**
-executed against a **per-agent persistent REPL**. Agents decompose work by
-writing delegation code, supervise children with fork/join semantics, and
-report through content-addressed artifacts — all under ISO/IEC 15288
-V-model discipline (analyze → decompose → delegate → verify → synthesize →
-terminate).
+executed against a **per-agent persistent REPL**. Each turn follows a small V:
+analyze its requirement, implement, verify against the parent's acceptance
+criteria. Agents decompose work by writing delegation code, supervise children
+with fork/join semantics, and report through content-addressed artifacts.
 
-**Why dhc exists** — mission, principles, and boundaries — lives in
-[`docs/breakdown/00-intent/`](docs/breakdown/00-intent/). The full current-state map
+**Why dhc exists** — mission, principles, boundaries, and the agent-owned
+direction — lives in [`docs/breakdown/00-intent/`](docs/breakdown/00-intent/). The full current-state map
 starts at [`docs/breakdown/README.md`](docs/breakdown/README.md).
 
 ## What dhc is
@@ -19,6 +18,8 @@ starts at [`docs/breakdown/README.md`](docs/breakdown/README.md).
 - **Per-agent persistent REPL** (INFO-050). Variables, functions and imports
   survive between turns; each agent's workspace is isolated from every other
   agent's.
+- **Agent-owned split** (INFO-074). The framework supplies instruments;
+  the agent owns orchestration and policy.
 - **Delegation by writing code** (INFO-004). A parent spawns children with
   encapsulated context (requirement + acceptance + explicit inputs), awaits
   them (ensure-terminal), and aggregates their results.
@@ -100,3 +101,8 @@ siblings still finish.
 - **How it is run** — [`docs/breakdown/05-operation/`](docs/breakdown/05-operation/)
   (INFO-057)
 - **What might change** — [`docs/breakdown/06-evolution/`](docs/breakdown/06-evolution/)
+
+## Tests
+
+- Full suite (default, every test): `.venv/bin/python -m pytest -q` (or `make test`)
+- Fast lane, opt-in only: `.venv/bin/python -m pytest -q -m "not slow"` (or `make test-fast`); the `slow` marker covers the heavy end-to-end suites (runtime lifecycle, event durability, mesh survival)

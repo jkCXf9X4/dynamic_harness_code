@@ -57,8 +57,10 @@ The D1..D5 gates the kernel contract must satisfy end to end, plus the runaway-c
 ## Runaway containment
 
 - A `while True: pass` loop is bounded by the step timeout.
-- The runaway settles `timeout` within 5 s; a timeout event is emitted.
-- The workspace rolls back — the partial mutation is gone.
+- The runaway settles `failed` within 5 s; a timeout event is emitted.
+- The workspace rolls back, so the partial mutation is gone.
+- A blocked Python thread is abandoned and may keep running.
+- Its calls still reach live tools, so late side effects are possible until tool access is revoked at settlement.
 
 ## Owns
 - The D1..D5 end-to-end acceptance criteria and the runaway-containment scenario.

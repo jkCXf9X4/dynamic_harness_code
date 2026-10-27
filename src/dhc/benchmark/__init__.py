@@ -15,7 +15,15 @@ evaluated objectively:
 
 from __future__ import annotations
 
-from .metrics import RunMetrics
+from .baseline import (
+    TokenBaseline,
+    TokenComparison,
+    baseline_from_runs,
+    compare_to_baseline,
+    load_baseline,
+    save_baseline,
+)
+from .metrics import RunMetrics, TokenSummary, summarize_tokens
 from .run import run_benchmark
 from .scoring import ScoringWeights, WEIGHTS, score
 from .tasks import ALL_TASKS, BenchmarkTask, find_task
@@ -25,8 +33,16 @@ __all__ = [
     "BenchmarkTask",
     "RunMetrics",
     "ScoringWeights",
+    "TokenBaseline",
+    "TokenComparison",
+    "TokenSummary",
     "WEIGHTS",
+    "baseline_from_runs",
+    "compare_to_baseline",
     "find_task",
+    "load_baseline",
     "run_benchmark",
+    "save_baseline",
     "score",
+    "summarize_tokens",
 ]

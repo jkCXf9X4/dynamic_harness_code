@@ -51,9 +51,8 @@ the plan's F1–F10 labels refer to.
   (`llm.call_timeout_seconds` is that one).
 - `runtime.artifact_store_real` is deprecated, forwarding to
   `runtime.artifact_store` (the `StoreAdapter`, W4).
-- `run_block` no longer takes a `timeout` parameter (planned W4.4,
-  truth-in-signatures; verified resolved this pass): it was an unenforced
-  lie; the outer step timeout is the only bound. The fabrication kit's
+- `run_block` takes no `timeout` parameter (W4.4, truth-in-signatures):
+  the outer step timeout is the only bound, and the fabrication kit's
   wrapper passes nothing through.
 
 ## Owns

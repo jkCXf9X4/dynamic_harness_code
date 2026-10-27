@@ -27,3 +27,4 @@ status: current
 - Operator-to-root request-result door itself — `INFO-017`.
 - Parent liveness keeping channels open — `INFO-014`.
 - Artifact publication tiers streaming rides on — `INFO-006`.
+- Demand-driven pump stepping that keeps delivery unblocked — `INFO-062`.

@@ -14,9 +14,18 @@ For each (prompt, task) pair the runner:
   * awaits settlement,
   * runs ``task.verify(output_dir, scan_root)`` — the failable ground-truth
     check,
-  * records :class:`~dhc.benchmark.metrics.RunMetrics`, and
+  * records :class:`~dhc.benchmark.metrics.RunMetrics` — including the real
+    token counts summed across every agent in the mesh (the usage seam is
+    ``Agent.record_usage``, written by the driver; a run whose driver never
+    reports usage is marked ``usage_recorded=False`` instead of being
+    reported as a zero-token run), and
   * writes results as JSON + Markdown under ``results_dir`` (default
     ``.optimize_benchmarks/``).
+
+Tokens per resolved task is the comparison metric. ``cost_usd`` is left at
+0.0 and is *not measured*: the provider exposes no usable price, so no cost
+model is built here. Use :mod:`dhc.benchmark.baseline` (``baseline=`` /
+``--baseline`` / ``--save-baseline``) to compare against a stored reference.
 
 A fresh Runtime per (prompt, task) keeps usage counters and the task graph
 attributable to exactly this run.
@@ -39,7 +48,16 @@ from ..llm.driver import MockDriver, driver_from_settings
 from ..data.models import AgentStatus
 from ..framework.runtime import Runtime
 from ..wiring import build_runtime
-from .metrics import RunMetrics, collect_metrics
+from .baseline import (
+    BaselineError,
+    TokenBaseline,
+    TokenComparison,
+    baseline_from_runs,
+    compare_to_baseline,
+    load_baseline,
+    save_baseline,
+)
+from .metrics import RunMetrics, collect_metrics, summarize_tokens
 from .scoring import format_scores
 from .tasks import ALL_TASKS, BenchmarkTask
 
@@ -152,13 +170,16 @@ def _run_one(
     runtime_factory: Callable[[], Runtime],
     workspace: Path,
     mock: bool,
+    driver_factory: Callable[[BenchmarkTask], Any] | None = None,
 ) -> RunMetrics:
     """Run one (prompt, task) pair against a fresh Runtime and verify it."""
     rt = runtime_factory()
     rt.start()
 
-    if mock:
-        driver: Any = MockDriver(_task_script(task))
+    if driver_factory is not None:
+        driver: Any = driver_factory(task)
+    elif mock:
+        driver = MockDriver(_task_script(task))
     else:
         driver = driver_from_settings(get_settings(), mock=False)
 
@@ -174,7 +195,7 @@ def _run_one(
     status = completion.status.value if completion.status else "unknown"
     if status == "completed":
         status = "completed"
-    elif status in ("failed", "timeout", "cancelled"):
+    elif status in ("failed", "cancelled"):
         status = "failed" if status != "cancelled" else "escalated"
 
     correct: bool | None = None
@@ -193,16 +214,21 @@ def _run_one(
         max_depth = max(max_depth, depth)
     total_turns = _count_turns(rt)
 
+    usage = _aggregate_usage(rt)
+    usage_recorded = _usage_recorded(rt, driver)
+
     return collect_metrics(
         prompt_id=prompt_id,
         task_id=task.id,
         status=status,
         correct=correct,
         verification_note=note,
-        total_tokens=0,
-        prompt_tokens=0,
-        completion_tokens=0,
-        cost_usd=0.0,
+        total_tokens=usage["prompt_tokens"] + usage["completion_tokens"],
+        prompt_tokens=usage["prompt_tokens"],
+        completion_tokens=usage["completion_tokens"],
+        cached_tokens=usage["cached_tokens"],
+        usage_recorded=usage_recorded,
+        cost_usd=0.0,  # unmeasured: the provider exposes no usable price
         agent_count=agent_count,
         max_depth=max_depth,
         delegations=delegations,
@@ -212,8 +238,44 @@ def _run_one(
         failures=0,
         escalations=0,
         latency_s=round(latency, 3),
-        extra={"mock": mock},
+        extra={"mock": mock, "cost_usd_measured": False},
     )
+
+
+def _aggregate_usage(rt: Runtime) -> dict[str, int]:
+    """Sum the usage counters of every agent in the mesh.
+
+    The counters are the ones ``Agent.record_usage`` (the driver seam)
+    accumulates — one agent's calls are indistinguishable from another's
+    once summed, which is exactly right for "what did this run cost in
+    tokens". Agents that never received usage contribute their zeros.
+    """
+    agg = {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
+    for agent in list(getattr(rt, "_agents", {}).values()):
+        agg["prompt_tokens"] += int(getattr(agent, "prompt_tokens", 0) or 0)
+        agg["completion_tokens"] += int(getattr(agent, "completion_tokens", 0) or 0)
+        agg["cached_tokens"] += int(getattr(agent, "cached_tokens", 0) or 0)
+    return agg
+
+
+def _usage_recorded(rt: Runtime, driver: Any) -> bool:
+    """True when provider usage was reported for this run.
+
+    Zero tokens and "no usage recorded" are different facts: ``MockDriver``
+    never calls ``record_usage`` (see its docstring) and a provider that
+    returns no usage object reports nothing, so their zero counters must not
+    be read as a measured zero. Any non-zero counter (from any agent in the
+    mesh) proves the seam ran; otherwise the root driver's client decides —
+    a client that recorded a ``_last_usage`` measured even when the counts
+    are zero.
+    """
+    usage = _aggregate_usage(rt)
+    if any(usage.values()):
+        return True
+    client = getattr(driver, "_client", None)
+    if client is None:
+        return False
+    return getattr(client, "_last_usage", None) is not None
 
 
 def _agent_depth(rt: Runtime, agent_id: str) -> int:
@@ -251,7 +313,10 @@ def _metrics_to_dict(m: RunMetrics) -> dict:
         "total_tokens": m.total_tokens,
         "prompt_tokens": m.prompt_tokens,
         "completion_tokens": m.completion_tokens,
-        "cost_usd": round(m.cost_usd, 6),
+        "cached_tokens": m.cached_tokens,
+        "usage_recorded": m.usage_recorded,
+        "tokens_per_resolved_task": m.tokens_per_resolved_task,
+        "cost_usd": round(m.cost_usd, 6),  # 0.0 = unmeasured, not free
         "agent_count": m.agent_count,
         "max_depth": m.max_depth,
         "delegations": m.delegations,
@@ -273,28 +338,76 @@ def write_results_json(runs: list[RunMetrics], path: Path) -> None:
 
 def _row(m: RunMetrics) -> str:
     mark = {True: "PASS", False: "FAIL", None: "n.a."}.get(m.correct, "?")
+    tokens = f"{m.total_tokens:>9}" if m.usage_recorded else f"{'n/a':>9}"
+    per_task = m.tokens_per_resolved_task
+    per_task_col = f"{per_task:>10.1f}" if per_task is not None else f"{'—':>10}"
     return (
-        f"| {m.prompt_id:<8} | {m.task_id:<10} | {mark:<5} | {m.total_tokens:>9} | "
-        f"{m.cost_usd:>8.4f} | {m.total_turns:>6} | {m.max_depth:>5} | "
+        f"| {m.prompt_id:<8} | {m.task_id:<10} | {mark:<5} | {tokens} | "
+        f"{per_task_col} | {m.total_turns:>6} | {m.max_depth:>5} | "
         f"{m.agent_count:>6} | {m.delegations:>7} | {m.latency_s:>6.1f} |"
     )
 
 
-def write_results_markdown(runs: list[RunMetrics], path: Path) -> None:
-    """Write per-run metrics as a Markdown report."""
+def write_results_markdown(
+    runs: list[RunMetrics],
+    path: Path,
+    comparison: TokenComparison | None = None,
+) -> None:
+    """Write per-run metrics as a Markdown report.
+
+    Cost is absent from the table on purpose: the benchmarked provider
+    exposes no price, so USD would be a fabricated column. Tokens per
+    resolved task is the comparison metric.
+    """
+    summary = summarize_tokens(runs)
     lines: list[str] = [
         "# Benchmark Metrics Report",
         "",
         "Per (prompt, task) run — objective, comparable.",
         "",
-        "| Prompt | Task | Verdict | Tokens | Cost($) | Turns | Depth | Agents | Deleg | Lat(s) |",
+        "Cost (USD) is **not measured**: the provider exposes no usable price, "
+        "so no cost model is applied. Tokens per resolved task is the "
+        "comparison metric; `n/a` means no usage was recorded.",
+        "",
+        "| Prompt | Task | Verdict | Tokens | Tok/resolved | Turns | Depth | Agents | Deleg | Lat(s) |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for m in runs:
         lines.append(_row(m))
+    lines += [
+        "",
+        "## Tokens per resolved task",
+        "",
+        f"- runs: {summary.runs} ({summary.recorded_runs} with recorded usage)",
+        f"- resolved: {summary.resolved_runs} "
+        f"({summary.resolved_recorded_runs} with recorded usage)",
+        f"- prompt: {summary.prompt_tokens}, completion: {summary.completion_tokens}, "
+        f"cached: {summary.cached_tokens}, total: {summary.total_tokens}",
+        "- tokens per resolved task: "
+        + (
+            f"{summary.tokens_per_resolved_task:.1f}"
+            if summary.tokens_per_resolved_task is not None
+            else "n/a (no recorded usage or no resolved task)"
+        ),
+    ]
+    if comparison is not None:
+        lines.append(f"- baseline: {comparison.format_line()}")
     lines += ["", "## Scores", "", "```", format_scores(runs), "```", ""]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines))
+
+
+def write_summary_json(
+    runs: list[RunMetrics],
+    path: Path,
+    comparison: TokenComparison | None = None,
+) -> None:
+    """Write the token aggregate (and baseline comparison, if any) as JSON."""
+    payload: dict[str, Any] = summarize_tokens(runs).to_dict()
+    if comparison is not None:
+        payload["baseline_comparison"] = comparison.to_dict()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def run_benchmark(
@@ -303,6 +416,10 @@ def run_benchmark(
     runtime_factory: Callable[[], Runtime] | None = None,
     results_dir: str | Path | None = None,
     mock: bool = True,
+    driver_factory: Callable[[BenchmarkTask], Any] | None = None,
+    baseline: TokenBaseline | str | Path | None = None,
+    save_baseline_to: str | Path | None = None,
+    baseline_label: str = "baseline",
 ) -> list[RunMetrics]:
     """Run every (prompt, task) pair and return the collected metrics.
 
@@ -311,11 +428,19 @@ def run_benchmark(
       built from the task description).
     * ``runtime_factory`` — callable returning a fresh Runtime per run
       (default: ``build_runtime(mock=mock)``).
-    * ``results_dir`` — where ``metrics.json`` and ``metrics.md`` are written
-      (default: ``.optimize_benchmarks/``).
+    * ``results_dir`` — where ``metrics.json``, ``metrics.md`` and
+      ``summary.json`` are written (default: ``.optimize_benchmarks/``).
     * ``mock`` — when True (default) the root agent is driven by a
       deterministic MockDriver script that performs the task work; when False
       a real LLM driver is used.
+    * ``driver_factory`` — optional ``task -> driver`` override (e.g. an
+      ``LLMDriver`` over a usage-reporting fake client in tests). Takes
+      precedence over ``mock``.
+    * ``baseline`` — a :class:`TokenBaseline` or a path to a stored baseline
+      JSON; when given, the token aggregate in ``summary.json``/``metrics.md``
+      includes the comparison.
+    * ``save_baseline_to`` — write this run set as the reference baseline
+      (tokens per resolved task) at that path.
     """
     tasks = list(tasks or ALL_TASKS)
     if prompts is None:
@@ -323,6 +448,8 @@ def run_benchmark(
     if runtime_factory is None:
         runtime_factory = _default_runtime_factory(mock)
     results_dir = Path(results_dir or DEFAULT_RESULTS_DIR)
+    if isinstance(baseline, (str, Path)):
+        baseline = load_baseline(baseline)
 
     all_runs: list[RunMetrics] = []
     for prompt_id, prompt_template in prompts.items():
@@ -337,13 +464,19 @@ def run_benchmark(
                     runtime_factory=runtime_factory,
                     workspace=workspace,
                     mock=mock,
+                    driver_factory=driver_factory,
                 )
             finally:
                 shutil.rmtree(workspace, ignore_errors=True)
             all_runs.append(metrics)
 
+    comparison = compare_to_baseline(all_runs, baseline) if baseline is not None else None
+    if save_baseline_to is not None:
+        save_baseline(baseline_from_runs(baseline_label, all_runs), save_baseline_to)
+
     write_results_json(all_runs, results_dir / "metrics.json")
-    write_results_markdown(all_runs, results_dir / "metrics.md")
+    write_results_markdown(all_runs, results_dir / "metrics.md", comparison)
+    write_summary_json(all_runs, results_dir / "summary.json", comparison)
     return all_runs
 
 
@@ -360,17 +493,48 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="use the real LLM driver instead of the deterministic mock",
     )
+    parser.add_argument(
+        "--baseline",
+        default=None,
+        help="path to a stored token baseline to compare against",
+    )
+    parser.add_argument(
+        "--save-baseline",
+        default=None,
+        metavar="PATH",
+        help="write this run set's tokens per resolved task as a baseline",
+    )
+    parser.add_argument(
+        "--baseline-label",
+        default="baseline",
+        help="label for --save-baseline (default: %(default)s)",
+    )
     args = parser.parse_args(argv)
 
-    runs = run_benchmark(
-        tasks=ALL_TASKS,
-        prompts={DEFAULT_PROMPT_ID: "{task}"},
-        results_dir=args.results_dir,
-        mock=not args.real,
-    )
+    try:
+        runs = run_benchmark(
+            tasks=ALL_TASKS,
+            prompts={DEFAULT_PROMPT_ID: "{task}"},
+            results_dir=args.results_dir,
+            mock=not args.real,
+            baseline=args.baseline,
+            save_baseline_to=args.save_baseline,
+            baseline_label=args.baseline_label,
+        )
+    except BaselineError as exc:
+        print(f"baseline error: {exc}")
+        return 2
+
     print(format_scores(runs))
-    print(f"\nResults written to {Path(args.results_dir) / 'metrics.json'} and "
-          f"{Path(args.results_dir) / 'metrics.md'}")
+    summary = summarize_tokens(runs)
+    if summary.tokens_per_resolved_task is not None:
+        print(f"\nTokens per resolved task: {summary.tokens_per_resolved_task:.1f} "
+              f"({summary.recorded_runs}/{summary.runs} runs recorded usage)")
+    else:
+        print("\nTokens per resolved task: n/a (no recorded usage or nothing resolved)")
+    print(f"Results written to {Path(args.results_dir) / 'metrics.json'}, "
+          f"{Path(args.results_dir) / 'metrics.md'} and "
+          f"{Path(args.results_dir) / 'summary.json'}")
     return 0
 
 

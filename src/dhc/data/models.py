@@ -203,12 +203,21 @@ class Result(BaseModel):
 class Event(BaseModel):
     """One recorded occurrence in an agent's lifecycle.
 
+    ``event_id`` is the event's stable identity, minted once at construction
+    and carried by every serialized form (``model_dump``). At-most-once
+    delivery dedups on it — never on ``id(event)`` object identity — so a
+    reconstructed but equivalent event is delivered once.
+
+    ``causal_id`` is a different thing: it links an event to the event that
+    caused it (the boundary-log DAG).
+
     ``payload`` is by reference: artifact ids / child ids, never full bodies.
     """
 
     model_config = ConfigDict(frozen=True)
 
     kind: EventKind
+    event_id: str = Field(default_factory=_new_id)
     causal_id: str | None = None
     agent_id: str
     payload: dict[str, Any] = Field(default_factory=dict)

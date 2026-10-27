@@ -23,6 +23,7 @@ its own workspace.
 - **Status: implemented.**
   - This IMP is adopted and in the code.
   - It lives under `implemented/` as the historical record of what was scoped and done.
+  - The hard-gate count is decided at exactly four (`INFO-053`).
   - It is no longer tracked as open work.
 
 - **Decision records.**
@@ -349,7 +350,6 @@ its own workspace.
   - Exact ceiling-cap defaults.
   - Whether `yield Await` replaces `await_` at the surface or coexists.
   - Whether the pump runs per-agent-thread (`INFO-038`) or per-advance.
-  - Whether the hard-gate count stays exactly four.
 
 ## Owns
 

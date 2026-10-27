@@ -19,7 +19,6 @@ Every other concern is agent-owned policy and composition.
 - **Loop shape.**
   - Framework supplies: a pump that steps the loop one yield window at a time (`INFO-037`, `INFO-062`).
   - Agent owns: the loop itself, its cadence, and how the next action is chosen (`INFO-050`).
-  - The default loop is an editable fabrication (`AD-011`).
 - **Context economy and encapsulation.**
   - Framework supplies: content-addressed artifacts with disclosure tiers (`INFO-006`).
   - Agent owns: what it pulls, what it hands down, and when (`INFO-004`).
@@ -32,14 +31,12 @@ Every other concern is agent-owned policy and composition.
 - **Capability growth.**
   - Framework supplies: Python, the REPL namespace, and the artifact store (`INFO-007`, `INFO-050`).
   - Agent owns: the tools it writes and keeps in its workspace.
-  - The core holds no curated tool registry.
 - **Waiting and cooperation.**
   - Framework supplies: parking, completion dispatch, and directed delivery (`INFO-047`, `INFO-054`).
   - Agent owns: whether it awaits, polls, or sleeps (`INFO-053`).
 - **Verification.**
   - Framework supplies: settlement and the event trail (`INFO-046`, `INFO-027`).
   - Agent owns: the acceptance checks it writes against its requirement (`INFO-003`).
-  - Verification evidence is agent-authored, not a runtime claim.
 
 ## Test for a new scenario
 

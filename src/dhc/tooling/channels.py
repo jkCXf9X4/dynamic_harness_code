@@ -287,9 +287,9 @@ class EscalationChannel:
 class OperatorQuestionChannel:
     """Any agent can ask the operator a question (INFO-023).
 
-    The question routes up the parent chain to the root and crosses to the
-    operator; the answer routes back down the same chain to the asking agent.
-    Asking is a normal channel state, not a failure. The answer event carries
+    The question is published on the operator channel and attributed to the
+    asking agent; the answer is addressed to that agent's stream. Asking is a
+    normal channel state, not a failure. The answer event carries
     ``causal_id`` = the question event's id.
     """
 

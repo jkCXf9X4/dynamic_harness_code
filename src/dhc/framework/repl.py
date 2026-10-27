@@ -18,15 +18,79 @@ the workspace; on timeout the step is rolled back and the generator is
 abandoned (never resumed). ``run_block`` provides non-locking nested exec so a
 generator step can run code against the workspace without deadlocking on the
 per-agent lock.
+
+Rollback snapshots copy nested plain ``dict``/``list``/``tuple``/``set``
+values (other objects stay shared by reference), so one snapshot per
+in-flight turn costs memory proportional to the workspace's plain-container
+size — the price of rolling back in-place nested mutation.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from ..data.models import Result
+
+
+class TurnCancelled(BaseException):
+    """Raised at a block boundary inside a turn that was cancelled.
+
+    Subclasses :class:`BaseException` so ordinary ``except Exception`` in
+    agent code does not swallow it; the engine turns it into a cancelled
+    outcome and the pump settles the agent ``cancelled``.
+    """
+
+
+#: Granularity (seconds) at which a timed step polls its cancel predicate.
+_CANCEL_POLL = 0.05
+
+#: Per-thread cancel predicate for the in-code surface (``bash`` polls it).
+_cancel_local = threading.local()
+
+
+def cancel_requested() -> bool:
+    """True when the turn running on this thread has been cancelled."""
+    predicate = getattr(_cancel_local, "predicate", None)
+    return bool(predicate is not None and predicate())
+
+
+def _set_thread_cancel(predicate: Callable[[], bool] | None) -> None:
+    _cancel_local.predicate = predicate
+
+
+def _snapshot_value(value: Any) -> Any:
+    """Copy nested plain containers; leave every other object by reference."""
+    kind = type(value)
+    if kind is dict:
+        return {k: _snapshot_value(v) for k, v in value.items()}
+    if kind is list:
+        return [_snapshot_value(v) for v in value]
+    if kind is tuple:
+        return tuple(_snapshot_value(v) for v in value)
+    if kind is set:
+        return {_snapshot_value(v) for v in value}
+    return value
+
+
+def _snapshot_workspace(workspace: dict) -> dict:
+    """Turn-start rollback snapshot (nested plain containers are copied).
+
+    ``__builtins__`` is kept by reference: it is interpreter machinery, not
+    agent state, and copying it would cost a dict of every builtin per turn.
+    """
+    snapshot = {}
+    for name, value in workspace.items():
+        if name == "__builtins__":
+            snapshot[name] = value
+            continue
+        try:
+            snapshot[name] = _snapshot_value(value)
+        except Exception:  # noqa: BLE001 - a racy/odd value stays shared
+            snapshot[name] = value
+    return snapshot
 
 
 @dataclass(frozen=True)
@@ -39,6 +103,9 @@ class AdvanceOutcome:
     - ``"finished"`` — the runner raised StopIteration; it is done.
     - ``"timeout"`` — the step exceeded its timeout; the runner was abandoned
       and the workspace was rolled back to the per-advance snapshot.
+    - ``"cancelled"`` — the step observed a cancel request; the runner was
+      abandoned and the workspace was rolled back to the per-advance
+      snapshot.
     - ``"error"`` — the step raised; the runner is finished (a generator that
       raised cannot be resumed) and the workspace is preserved (INFO-005).
     - ``"suspended"`` — the runner is parked; advance did not run it.
@@ -95,11 +162,12 @@ class ReplEngine:
       rolled back to a snapshot taken at turn start and a failed result with
       ``reason="turn timed out"`` is returned. The worker thread cannot be
       killed (Python threads are not killable) and may keep running in the
-      background, but it only ever mutates the discarded pre-rollback dict, so
-      the workspace stays usable and uncorrupted. The snapshot is shallow:
-      in-place mutation of a nested object by a timed-out turn is not rolled
-      back (deep-copying arbitrary workspace contents is neither safe nor
-      cheap).
+      background, but it only ever mutates the discarded pre-rollback dict
+      (and the snapshot's own nested copies), so the workspace stays usable
+      and uncorrupted. The snapshot copies nested plain containers (dict,
+      list, tuple, set) so in-place mutation of a nested object by a
+      timed-out turn is rolled back too; arbitrary objects stay shared by
+      reference.
 
     Resumable-run primitives (IMP-001 Step 1)
     -----------------------------------------
@@ -109,11 +177,19 @@ class ReplEngine:
       yield-window (one step) under the per-agent lock and returns an
       :class:`AdvanceOutcome` describing what the generator yielded.
     - **Per-advance snapshot**: each timed advance snapshots the workspace
-      (the shallow-copy mechanism of INFO-020, now per-step). On timeout the
-      workspace is rolled back to the snapshot and the generator is
-      **abandoned** — never resumed, because the old worker thread may still
-      be mutating the discarded snapshot dict. Sequential join-ordered
+      (nested plain containers copied, other objects by reference). On
+      timeout the workspace is rolled back to the snapshot and the generator
+      is **abandoned** — never resumed, because the old worker thread may
+      still be mutating the discarded snapshot dict. Sequential join-ordered
       advances are safe.
+    - **Cancellation**: :meth:`bind_cancel` attaches an external predicate
+      (the pump binds the runtime's stop flag) and :meth:`request_cancel`
+      sets the engine's own flag. A running turn observes it between blocks
+      (:meth:`run_block` raises :class:`TurnCancelled`) and inside
+      :meth:`advance`'s join loop, which abandons the runner and reports a
+      ``"cancelled"`` outcome instead of waiting for the step timeout. A
+      turn blocked in pure Python cannot be interrupted; it is abandoned
+      exactly like a timed-out step.
     - **Lifecycle**: :meth:`suspend` parks the runner (advance does not run
       it), :meth:`resume` continues it from the same point, :meth:`kill`
       abandons it and clears the installed runner. Cancellation lands between
@@ -132,6 +208,8 @@ class ReplEngine:
         self._locks: dict[str, threading.Lock] = {}
         self._runners: dict[str, Any] = {}
         self._runner_states: dict[str, str] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._cancel_predicates: dict[str, Callable[[], bool]] = {}
         self._dict_lock = threading.Lock()
 
     # -- public API -------------------------------------------------------- #
@@ -151,11 +229,11 @@ class ReplEngine:
         with lock:  # per-agent serialization: a second turn blocks
             if namespace:
                 workspace.update(namespace)  # caller namespace wins
-            snapshot = dict(workspace)
+            snapshot = _snapshot_workspace(workspace)
             prev_result = workspace.pop("result", None)  # per-turn slot
 
             if timeout is None:
-                return self._run_sync(workspace, code, prev_result)
+                return self._run_sync(agent_id, workspace, code, prev_result)
             return self._run_timed(
                 agent_id, workspace, code, prev_result, timeout, snapshot
             )
@@ -170,6 +248,7 @@ class ReplEngine:
             self._workspaces.setdefault(agent_id, {})
             lock = self._locks.setdefault(agent_id, threading.Lock())
         with lock:
+            self.clear_cancel(agent_id)
             self._runners[agent_id] = generator
             self._runner_states[agent_id] = "active"
 
@@ -211,6 +290,43 @@ class ReplEngine:
         with lock:
             workspace.update(namespace)
 
+    def bind_cancel(self, agent_id: str, predicate: Callable[[], bool]) -> None:
+        """Attach an external cancel predicate to *agent_id*'s turns.
+
+        The pump binds the runtime's stop flag here so a running turn can
+        observe cancellation between blocks (instead of only after the step
+        returns or times out). The predicate is polled from the turn's
+        worker thread; it must be cheap and thread-safe.
+        """
+        with self._dict_lock:
+            self._cancel_predicates[agent_id] = predicate
+
+    def unbind_cancel(self, agent_id: str) -> None:
+        """Drop *agent_id*'s external cancel predicate (pump teardown)."""
+        with self._dict_lock:
+            self._cancel_predicates.pop(agent_id, None)
+
+    def request_cancel(self, agent_id: str) -> None:
+        """Mark *agent_id*'s running turn cancelled (engine-owned flag)."""
+        with self._dict_lock:
+            self._cancel_events.setdefault(agent_id, threading.Event()).set()
+
+    def clear_cancel(self, agent_id: str) -> None:
+        """Forget a prior cancellation (a fresh runner install does this)."""
+        with self._dict_lock:
+            event = self._cancel_events.get(agent_id)
+            if event is not None:
+                event.clear()
+
+    def cancelled(self, agent_id: str) -> bool:
+        """True when *agent_id*'s running turn has been cancelled."""
+        with self._dict_lock:
+            event = self._cancel_events.get(agent_id)
+            predicate = self._cancel_predicates.get(agent_id)
+        if event is not None and event.is_set():
+            return True
+        return bool(predicate is not None and predicate())
+
     def suspend(self, agent_id: str) -> None:
         """Park the installed runner: advance will not run it until resumed."""
         with self._dict_lock:
@@ -228,12 +344,17 @@ class ReplEngine:
                 self._runner_states[agent_id] = "active"
 
     def kill(self, agent_id: str) -> None:
-        """Abandon the installed runner and clear it; it is never resumed."""
+        """Abandon the installed runner and clear it; it is never resumed.
+
+        Also raises the engine cancel flag so a blocking nested call still
+        running in the abandoned runner's thread (e.g. ``bash``) is killed.
+        """
         with self._dict_lock:
             lock = self._locks.setdefault(agent_id, threading.Lock())
         with lock:
             if agent_id in self._runners:
                 self._abandon_runner(agent_id)
+            self.request_cancel(agent_id)
 
     def run_block(self, agent_id: str, code: str) -> Result:
         """Execute *code* against the agent's workspace WITHOUT the lock.
@@ -247,12 +368,22 @@ class ReplEngine:
             workspace = self._workspaces.get(agent_id)
         if workspace is None:
             return Result(done=True, ok=False, reason="no workspace for agent")
+        # Cancellation boundary: a cancelled turn stops at the next block
+        # instead of running to the end of the step.
+        if self.cancelled(agent_id):
+            raise TurnCancelled("turn cancelled")
         try:
             exec(code, workspace)
+        except TurnCancelled:
+            raise
         except BaseException as exc:  # noqa: BLE001 - contained per INFO-005
             return Result(
                 done=True, ok=False, reason=f"{type(exc).__name__}: {exc}"
             )
+        # A block may itself have observed the cancel signal (e.g. ``bash``
+        # killed its subprocess and returned): stop before the next block.
+        if self.cancelled(agent_id):
+            raise TurnCancelled("turn cancelled")
         return self._result_from(workspace)
 
     def inject_nolock(self, agent_id: str, namespace: dict) -> None:
@@ -280,6 +411,8 @@ class ReplEngine:
             self._locks.pop(agent_id, None)
             self._runners.pop(agent_id, None)
             self._runner_states.pop(agent_id, None)
+            self._cancel_events.pop(agent_id, None)
+            self._cancel_predicates.pop(agent_id, None)
 
     def globals_for(self, agent_id: str) -> dict:
         """Return a copy of the agent's workspace (inspection only)."""
@@ -297,17 +430,42 @@ class ReplEngine:
     def _advance_sync(
         self, agent_id: str, workspace: dict, runner: Any
     ) -> AdvanceOutcome:
+        _set_thread_cancel(lambda: self.cancelled(agent_id))
         try:
             value = next(runner)
         except StopIteration:
             self._finish_runner(agent_id)
             return AdvanceOutcome(kind="finished")
+        except TurnCancelled:
+            self._abandon_runner(agent_id)
+            return AdvanceOutcome(kind="cancelled", reason="step cancelled")
         except BaseException as exc:  # noqa: BLE001 - contained
             self._finish_runner(agent_id)
             return AdvanceOutcome(
                 kind="error", reason=f"{type(exc).__name__}: {exc}"
             )
+        finally:
+            _set_thread_cancel(None)
         return AdvanceOutcome(kind="yield", value=value)
+
+    def _join_timed(
+        self, agent_id: str, worker: threading.Thread, timeout: float
+    ) -> str:
+        """Join *worker* up to *timeout*, polling cancellation in slices.
+
+        Returns ``"done"`` (worker ended), ``"cancelled"`` (cancel observed
+        while it was still running) or ``"timeout"``.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return "timeout" if worker.is_alive() else "done"
+            worker.join(min(_CANCEL_POLL, remaining))
+            if not worker.is_alive():
+                return "done"
+            if self.cancelled(agent_id):
+                return "cancelled"
 
     def _advance_timed(
         self,
@@ -316,37 +474,50 @@ class ReplEngine:
         runner: Any,
         timeout: float,
     ) -> AdvanceOutcome:
-        snapshot = dict(workspace)
+        snapshot = _snapshot_workspace(workspace)
         outcome: dict = {}
 
         def run() -> None:
+            _set_thread_cancel(lambda: self.cancelled(agent_id))
             try:
                 value = next(runner)
                 outcome["kind"] = "yield"
                 outcome["value"] = value
             except StopIteration:
                 outcome["kind"] = "finished"
+            except TurnCancelled:
+                outcome["kind"] = "cancelled"
             except BaseException as exc:  # noqa: BLE001 - contained
                 outcome["kind"] = "error"
                 outcome["reason"] = f"{type(exc).__name__}: {exc}"
+            finally:
+                _set_thread_cancel(None)
 
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
-        worker.join(timeout)
-        if worker.is_alive():
-            # Timed out: the worker may still be mutating *workspace*; discard
-            # it and roll back to the per-advance snapshot (INFO-020, now
-            # per-step).
+        state = self._join_timed(agent_id, worker, timeout)
+        if state != "done":
+            # Timed out or cancelled: the worker may still be mutating
+            # *workspace*; discard it and roll back to the per-advance
+            # snapshot (INFO-020, now per-step). The thread itself cannot be
+            # killed; it is confined to the discarded dict.
             with self._dict_lock:
                 self._workspaces[agent_id] = snapshot
             self._abandon_runner(agent_id)
-            return AdvanceOutcome(kind="timeout")
+            if state == "cancelled":
+                return AdvanceOutcome(kind="cancelled", reason="step cancelled")
+            return AdvanceOutcome(
+                kind="timeout", reason=f"step timed out after {timeout}s"
+            )
         kind = outcome.get("kind")
         if kind == "yield":
             return AdvanceOutcome(kind="yield", value=outcome.get("value"))
         if kind == "finished":
             self._finish_runner(agent_id)
             return AdvanceOutcome(kind="finished")
+        if kind == "cancelled":
+            self._abandon_runner(agent_id)
+            return AdvanceOutcome(kind="cancelled", reason="step cancelled")
         self._finish_runner(agent_id)
         return AdvanceOutcome(kind="error", reason=outcome.get("reason", ""))
 
@@ -363,15 +534,21 @@ class ReplEngine:
             self._runner_states[agent_id] = "abandoned"
 
     def _run_sync(
-        self, workspace: dict, code: str, prev_result: object
+        self, agent_id: str, workspace: dict, code: str, prev_result: object
     ) -> Result:
+        _set_thread_cancel(lambda: self.cancelled(agent_id))
         try:
             exec(code, workspace)
+        except TurnCancelled:
+            self._restore_result(workspace, prev_result)
+            return Result(done=True, ok=False, reason="turn cancelled")
         except BaseException as exc:  # noqa: BLE001 - contained per INFO-005
             self._restore_result(workspace, prev_result)
             return Result(
                 done=True, ok=False, reason=f"{type(exc).__name__}: {exc}"
             )
+        finally:
+            _set_thread_cancel(None)
         return self._result_from(workspace)
 
     def _run_timed(
@@ -386,22 +563,35 @@ class ReplEngine:
         outcome: dict = {}
 
         def run() -> None:
+            _set_thread_cancel(lambda: self.cancelled(agent_id))
             try:
                 exec(code, workspace)
                 outcome["ok"] = True
+            except TurnCancelled:
+                outcome["cancelled"] = True
             except BaseException as exc:  # noqa: BLE001 - contained
                 outcome["ok"] = False
                 outcome["error"] = exc
+            finally:
+                _set_thread_cancel(None)
 
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
-        worker.join(timeout)
-        if worker.is_alive():
-            # Timed out: the worker may still be mutating *workspace*; discard
-            # it and roll back to the turn-start snapshot (INFO-020).
+        state = self._join_timed(agent_id, worker, timeout)
+        if state != "done":
+            # Timed out or cancelled: the worker may still be mutating
+            # *workspace*; discard it and roll back to the turn-start
+            # snapshot (INFO-020). The thread itself cannot be killed; it is
+            # confined to the discarded dict.
             with self._dict_lock:
                 self._workspaces[agent_id] = snapshot
+            if state == "cancelled":
+                return Result(done=True, ok=False, reason="turn cancelled")
             return Result(done=True, ok=False, reason="turn timed out")
+        if outcome.get("cancelled"):
+            with self._dict_lock:
+                self._workspaces[agent_id] = snapshot
+            return Result(done=True, ok=False, reason="turn cancelled")
         if not outcome.get("ok", False):
             self._restore_result(workspace, prev_result)
             exc = outcome["error"]

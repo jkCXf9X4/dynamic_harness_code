@@ -38,7 +38,7 @@ status: current
   - `agent.created_ts`
   - `agent.settled_ts`
   - Checkpoint `updated_at`
-  - `events.jsonl`/`trace.jsonl` timestamps
+  - `events.jsonl` timestamps
   - `Event`/`Message`/`Turn` model defaults
   - For humans and post-hoc inspection.
   - None read back into a comparison.

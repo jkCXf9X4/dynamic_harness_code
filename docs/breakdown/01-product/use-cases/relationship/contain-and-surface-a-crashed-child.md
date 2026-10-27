@@ -19,3 +19,4 @@ status: current
 ## Excludes
 - Retry or re-decomposition policy after a failure — `INFO-004`.
 - The action loop that may crash — `INFO-002`.
+- The thread-or-process placement the containment relies on — `INFO-038`.

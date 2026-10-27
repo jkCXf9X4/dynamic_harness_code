@@ -29,3 +29,4 @@ status: current
 - Crash containment and failure surfacing — `INFO-005`.
 - The per-turn action loop — `INFO-002`.
 - The child-REPL isolation the context transfer rides on — `INFO-050`.
+- The spawn surface and handle discipline delegation code calls — `INFO-072`.

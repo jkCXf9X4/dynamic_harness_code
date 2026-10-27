@@ -17,7 +17,7 @@ status: current
   - This leaf settles maintainer architecture calls.
   - It is the arbiter when two design options both look defensible.
 - **Bet.**
-  - One expressive code block per turn beats several tool-call turns on cost per resolved task, at equal or better quality.
+  - One expressive code block per turn beats several tool-call turns on tokens per resolved task, at equal or better quality.
   - Expressiveness is the mechanism: loops, fan-out, transforms, and error handling fit inside one action.
   - Fresh-context corollary: decomposed workers beat one long monolith.
   - The anchor is ~3K delegation overhead against >15K context rot, a claim under test rather than a measured result.
@@ -64,7 +64,7 @@ When commitments conflict, the higher line wins.
 
 All of these must hold on the reference set (`INFO-068`).
 
-- **Cost.** Tokens per resolved task stay below the tool-call baseline (`INFO-069`).
+- **Tokens.** Tokens per resolved task stay below the tool-call baseline (`INFO-069`).
 - **Quality.** Task success equals or beats that baseline.
 - **Turn count.** Turns per resolved task stay lower than the baseline.
 - **Delegation overhead.** Overhead stays below the parent context it saves.
@@ -75,8 +75,9 @@ All of these must hold on the reference set (`INFO-068`).
 
 - **Control flow is not reproducible.** The loop is agent code; the artifact and event trail carries the audit (`INFO-037`, `INFO-027`).
 - **Trust surface inside the container.** Agent code is arbitrary Python (`INFO-072`).
-- **Review cost.** Behaviour lives in code and artifacts, not in configuration.
+- **A running turn cannot be killed.** Cancellation stops at the next block boundary and kills subprocess groups; a blocked Python thread is abandoned (`INFO-005`).
 - **Onboarding cost.** Defaults are starting points to edit, not a stable abstraction (`AD-011`).
+- **Files need an explicit workspace root.** Without one, the cap counts REPL state only (`INFO-065`).
 - **Weaker static guarantees.** Guarantees are runtime gates, not types.
 
 ## Inspirations

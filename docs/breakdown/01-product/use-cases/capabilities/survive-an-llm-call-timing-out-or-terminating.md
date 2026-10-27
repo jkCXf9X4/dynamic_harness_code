@@ -29,3 +29,4 @@ status: current
 - Crash containment for child process itself — `INFO-005`.
 - Retry, timeout-budget, or re-decomposition policy after failure — `INFO-004`.
 - Action loop whose LLM call failed — `INFO-002`.
+- Client-failure handling at the driver seam that lets the turn settle — `INFO-064`.

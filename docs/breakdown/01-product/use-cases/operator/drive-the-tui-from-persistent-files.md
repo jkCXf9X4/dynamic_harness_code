@@ -2,7 +2,7 @@
 id: INFO-028
 type: info
 title: Minimalistic UI/TUI 
-summary: The operator's TUI is a minimal chat whose content and layout come from persistent files
+summary: The operator's TUI is a minimal chat; only the event tail reads persistent files
 date: 2026-10-05
 status: current
 ---
@@ -14,7 +14,8 @@ status: current
   - Scrolling message stream and input line.
   - No extra panes, menus, dashboards.
 - **Persistent files**
-  - Context info, debug info, additional information live in persistent files as much as possible.
+  - The event tail reads `events.jsonl`.
+  - Tree and stats read the live runtime, not files.
 
 ## Owns
 - Operator-facing TUI shell: chat-only view.

@@ -39,6 +39,8 @@ from examples._mock_scripts import (  # noqa: E402
     build_root_script,
 )
 
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
 # Shared mock scripts (examples/_mock_scripts.py): the integration test uses
 # a short literal report body; the value demo uses the long CHILD_REPORT.
 CHILD_OK = build_child_ok("child report body")

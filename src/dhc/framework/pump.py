@@ -23,7 +23,8 @@ The four hard gates (D2) are enforced on the pump path exactly as before:
   ``runtime.py``),
 - crash containment (per-step error/timeout classification),
 - ceiling caps (``Runtime._caps_watchdog`` -> :mod:`dhc.framework.caps`),
-- cancellation grace (stop-flag check between steps).
+- cancellation grace (stop-flag check between steps, at nested block
+  boundaries, and inside blocking waits).
 
 Shape: module-level functions taking the ``Runtime`` instance as first
 param; ``runtime.py`` keeps thin method wrappers as the re-export seam, so
@@ -122,6 +123,29 @@ def step_timeout(runtime: Any) -> float:
     return runtime._max_turn_seconds() or _DEFAULT_STEP_TIMEOUT
 
 
+def bind_cancel(runtime: Any, engine: Any, agent_id: str) -> None:
+    """Let *engine* observe *agent_id*'s stop flag from inside a turn.
+
+    The engine polls the predicate between nested blocks and inside
+    blocking waits (``bash``), so cancellation reaches a running turn at
+    the next boundary instead of only after the step timeout. A legacy
+    in-memory engine without the seam is left alone.
+    """
+    bind = getattr(engine, "bind_cancel", None)
+    if bind is None:
+        return
+    flag = runtime._stop_flags.get(agent_id)
+    if flag is not None:
+        bind(agent_id, flag.is_set)
+
+
+def unbind_cancel(engine: Any, agent_id: str) -> None:
+    """Drop the engine cancel predicate bound at agent start."""
+    unbind = getattr(engine, "unbind_cancel", None)
+    if unbind is not None:
+        unbind(agent_id)
+
+
 # --------------------------------------------------------------------------- #
 # Worker entry
 # --------------------------------------------------------------------------- #
@@ -162,7 +186,11 @@ def legacy_loop(
     default-fabrication semantics for the legacy in-memory engine.
     """
     agent = runtime._agents[agent_id]
+    # Bind on the engine that actually runs the turn (a wired runtime wraps it
+    # in an adapter; the raw ReplEngine carries the cancel seam).
+    legacy_engine = getattr(runtime, "repl_engine", None) or runtime.engine
     last_result: Optional[Result] = None
+    bind_cancel(runtime, legacy_engine, agent_id)
     try:
         while True:
             if runtime._stop_flags[agent_id].is_set():
@@ -212,7 +240,9 @@ def legacy_loop(
                 )
             except TurnTimeoutError as exc:
                 runtime._emit(agent_id, EventKind.timeout, payload={"error": str(exc)})
-                runtime._settle(agent_id, AgentStatus.timeout, reason=str(exc))
+                # A turn that overruns its step timeout is a failure: the
+                # reason (the timeout text) is preserved on the settlement.
+                runtime._settle(agent_id, AgentStatus.failed, reason=str(exc))
                 return
             except Exception as exc:  # noqa: BLE001 - crash containment
                 runtime._emit(
@@ -245,6 +275,8 @@ def legacy_loop(
                 )
     except Exception as exc:  # noqa: BLE001 - last-resort containment
         runtime._settle(agent_id, AgentStatus.failed, reason=f"worker crashed: {exc}")
+    finally:
+        unbind_cancel(legacy_engine, agent_id)
 
 
 def pump_loop(
@@ -266,7 +298,8 @@ def pump_loop(
     - settlement at-most-once (``_settle`` / CompletionLog),
     - crash containment (per-step error/timeout classification),
     - ceiling caps (``_caps_watchdog``),
-    - cancellation grace (stop-flag check between steps).
+    - cancellation grace (stop-flag check between steps, at nested block
+      boundaries, and inside blocking waits).
 
     A custom spawn-time *driver* is honored by seeding
     ``state["_driver"]`` BEFORE installing — the decide fabrication reads
@@ -287,6 +320,10 @@ def pump_loop(
         )
         return
     kit = runtime.kit_factory(runtime, engine, agent)
+    # Cancellation boundary: the engine polls this predicate between nested
+    # blocks (raising TurnCancelled) and inside blocking waits (bash kills
+    # its process group), so a cancelled turn stops at the next boundary.
+    bind_cancel(runtime, engine, agent_id)
     if driver is not None:
         kit["state"]["_driver"] = driver
     # The yield vocabulary (D3) is part of the in-code surface: agent
@@ -517,16 +554,25 @@ def pump_loop(
                         pass
                     runtime._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
                     return
+                reason = outcome.reason or f"step timed out after {runtime._step_timeout()}s"
                 runtime._emit(
                     agent_id,
                     EventKind.timeout,
-                    payload={"error": outcome.reason or "step timed out"},
+                    payload={"error": reason},
                 )
-                runtime._settle(
-                    agent_id,
-                    AgentStatus.timeout,
-                    reason=outcome.reason or "step timed out",
-                )
+                # Timeout is a failure, not a fifth terminal state: the
+                # agent settles failed with the timeout reason preserved.
+                runtime._settle(agent_id, AgentStatus.failed, reason=reason)
+                return
+            if outcome.kind == "cancelled":
+                # The engine observed the cancel flag between blocks (or in
+                # its join loop) and abandoned the runner; no further step
+                # can be issued.
+                try:
+                    engine.kill(agent_id)
+                except Exception:  # noqa: BLE001 - kill is best-effort
+                    pass
+                runtime._settle(agent_id, AgentStatus.cancelled, reason="cancelled")
                 return
             if outcome.kind == "error":
                 if runtime._stop_flags[agent_id].is_set():
@@ -570,6 +616,8 @@ def pump_loop(
             return
     except Exception as exc:  # noqa: BLE001 - last-resort containment
         runtime._settle(agent_id, AgentStatus.failed, reason=f"worker crashed: {exc}")
+    finally:
+        unbind_cancel(engine, agent_id)
 
 
 # --------------------------------------------------------------------------- #

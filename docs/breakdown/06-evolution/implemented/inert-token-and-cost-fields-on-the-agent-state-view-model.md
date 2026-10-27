@@ -2,7 +2,7 @@
 id: IMP-004
 type: imp
 title: Inert token and cost fields on the agent state view-model
-summary: AgentNode's token and cost fields are never populated. State view-model reports zero usage; the provider call already returns usage
+summary: AgentNode's token and cost fields are populated by the driver seam; the state view-model renders real usage
 date: 2026-10-08
 status: current
 pb_exempt: true
@@ -10,27 +10,27 @@ pb_exempt: true
 
 # Inert token and cost fields on the agent state view-model
 
-Scoped candidate, not implementation approval. Needs decision record and task contract before code changes begin (change pipeline).
+Implemented. This record keeps the scoping history; the current mechanism lives in `INFO-059`.
 
-## Why — pain and evidence
+## Why — pain and evidence (before implementation)
 
-- **The fields exist but are never written.**
+- **The fields existed but were never written.**
   - `src/dhc/ui/state.py` (`AgentNode`, lines 78–95) carries `tokens`, `messages`, `context_tokens`, `prompt_tokens`, `completion_tokens`, `cached_tokens`, `cost_usd`, and `cum_cost_usd`.
   - All default to zero.
   - Scoping brief (run `261008_105638_6a18`, §2) and decision record `IMD-001` (agent module separation) list them as inert.
-  - No code path in `src/dhc/framework/` or `src/dhc/wiring.py` ever assigns them.
+  - No code path in `src/dhc/framework/` or `src/dhc/wiring.py` ever assigned them.
 
 - **The data already exists at the driver boundary.**
   - `LLMResponse` (`src/dhc/llm/llm.py:93–100`) carries `usage`: a dict with `prompt_tokens`/`completion_tokens`/`cached_tokens`, built at `llm.py:355–370`.
   - It also carries `cost_usd` (estimated at `llm.py:348`).
   - The provider call already measures what the view-model claims to report.
-  - The value is simply dropped on the way to the agent's state.
+  - The value was simply dropped on the way to the agent's state.
 
-- **The view-model lies by default.**
-  - `AgentNode.usage` (state.py:112–128) renders token/cost figures only when non-zero.
-  - Today it renders nothing.
-  - An operator inspecting a live agent (the `operator.inspect` window, IMP-001 D2) sees no usage at all.
-  - Any future budget or rot policy that wants a token signal has no signal to read.
+- **The view-model lied by default.**
+  - `AgentNode.usage` (state.py:112–128) rendered token/cost figures only when non-zero.
+  - It rendered nothing.
+  - An operator inspecting a live agent (the `operator.inspect` window, IMP-001 D2) saw no usage at all.
+  - No budget or rot policy had a token signal to read.
 
 ## The proposed shape
 

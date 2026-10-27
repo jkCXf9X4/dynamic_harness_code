@@ -8,20 +8,25 @@ on alias use, and cap ceilings resolve through one
 
 from __future__ import annotations
 
+import time
 import warnings
 from pathlib import Path
 
 import pytest
 
-from dhc.data.config import HarnessConfig, SafetyConfig, Settings
+from dhc.data.config import HarnessConfig, SafetyConfig, Settings, load_settings
 from dhc.framework.caps import (
     ALIASES,
     CAP_NAMES,
     ConfigResolver,
     agent_budgets,
+    cap_hit,
     cap_limit,
     read_cap,
+    reset_workspace_baseline,
     resolve_budget_key,
+    workspace_file_bytes,
+    workspace_scan_truncated,
 )
 
 
@@ -164,3 +169,160 @@ class TestAgentBudgets:
             warnings.simplefilter("ignore")
             out = agent_budgets(engine, "a")
         assert out == {"iterations": 4}
+
+
+# ---------------------------------------------------------------------------
+# workspace_bytes: REPL state + files the agent wrote (bash included)
+# ---------------------------------------------------------------------------
+
+
+class _NamespaceEngine:
+    """Minimal engine: a fixed REPL namespace, no budgets."""
+
+    def __init__(self, namespace=None):
+        self._namespace = namespace or {}
+
+    def globals_for(self, agent_id):
+        return dict(self._namespace)
+
+
+def _ws_settings(root, **safety_kwargs) -> Settings:
+    return Settings(
+        workspace_root=Path(root),
+        artifact_root=Path(root),
+        workspace_root_explicit=True,
+        config=HarnessConfig(safety=SafetyConfig(**safety_kwargs)),
+    )
+
+
+def _ws_hit(settings, namespace=None):
+    return cap_hit(
+        "a",
+        _NamespaceEngine(namespace),
+        0,
+        time.monotonic(),
+        settings=settings,
+        child_count=lambda: 0,
+        pending_messages=lambda: 0,
+    )
+
+
+def _write(path: Path, size: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x" * size)
+
+
+class TestWorkspaceFootprint:
+    @pytest.fixture(autouse=True)
+    def _fresh_baseline(self):
+        reset_workspace_baseline()
+        yield
+        reset_workspace_baseline()
+
+    def test_large_repl_state_trips(self, tmp_path):
+        settings = _ws_settings(tmp_path, max_workspace_bytes=500)
+        hit = _ws_hit(settings, {"blob": "x" * 2000})
+        assert hit == {
+            "cap": "workspace_bytes",
+            "limit": 500,
+            "source": "ceiling",
+        }
+
+    def test_file_written_in_workspace_trips(self, tmp_path):
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        assert _ws_hit(settings) is None  # baseline snapshot taken here
+        _write(tmp_path / "dump.bin", 2000)
+        hit = _ws_hit(settings)
+        assert hit is not None and hit["cap"] == "workspace_bytes"
+        assert hit["limit"] == 1000
+
+    def test_filesystem_growth_alone_trips(self, tmp_path):
+        # The REPL state is empty: nothing but the file can trip the cap.
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        assert _ws_hit(settings, {}) is None
+        _write(tmp_path / "from_bash.log", 4096)
+        hit = _ws_hit(settings, {})
+        assert hit is not None and hit["cap"] == "workspace_bytes"
+
+    def test_nested_directory_growth_trips(self, tmp_path):
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        assert _ws_hit(settings) is None
+        nested = tmp_path / "a" / "b" / "c" / "d" / "e"
+        for index in range(3):
+            _write(nested / f"part{index}.bin", 800)
+        hit = _ws_hit(settings)
+        assert hit is not None and hit["cap"] == "workspace_bytes"
+
+    def test_growth_of_existing_file_counts(self, tmp_path):
+        existing = tmp_path / "notes.txt"
+        _write(existing, 100)
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        assert _ws_hit(settings) is None
+        with existing.open("ab") as handle:
+            handle.write(b"y" * 2000)
+        assert _ws_hit(settings) is not None
+
+    def test_preexisting_files_do_not_count(self, tmp_path):
+        # A checked-out tree is not the agent's footprint: the baseline is
+        # taken on the first measurement, so only new/grown files count.
+        _write(tmp_path / "vendor" / "big.bin", 50_000)
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        assert _ws_hit(settings) is None
+        assert workspace_file_bytes(settings) == 0
+
+    def test_pruned_directories_are_ignored(self, tmp_path):
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        assert _ws_hit(settings) is None
+        _write(tmp_path / ".git" / "objects" / "pack.bin", 50_000)
+        _write(tmp_path / "node_modules" / "dep" / "index.js", 50_000)
+        _write(tmp_path / "__pycache__" / "mod.pyc", 50_000)
+        assert _ws_hit(settings) is None
+
+    def test_unusable_root_measures_zero(self, tmp_path):
+        missing = tmp_path / "gone"
+        settings = _ws_settings(missing, max_workspace_bytes=10)
+        assert workspace_file_bytes(settings) == 0
+        assert _ws_hit(settings) is None
+
+    def test_implicit_cwd_root_is_not_scanned(self, tmp_path):
+        # Default (implicit) root: the interpreter's cwd is not the agent's
+        # workspace, so files never count — only REPL state does.
+        settings = Settings(
+            workspace_root=Path(tmp_path),
+            artifact_root=Path(tmp_path),
+            config=HarnessConfig(safety=SafetyConfig(max_workspace_bytes=1000)),
+        )
+        assert settings.workspace_root_explicit is False
+        _write(tmp_path / "ignored.bin", 50_000)
+        assert workspace_file_bytes(settings) == 0
+        assert _ws_hit(settings) is None
+
+    def test_load_settings_sets_explicit_flag(self, tmp_path):
+        explicit = load_settings(env={"DHC_WORKSPACE_ROOT": str(tmp_path)})
+        assert explicit.workspace_root == tmp_path
+        assert explicit.workspace_root_explicit is True
+        implicit = load_settings(env={})
+        assert implicit.workspace_root == Path.cwd()
+        assert implicit.workspace_root_explicit is False
+
+    def test_truncated_baseline_disables_accounting_without_trip(
+        self, tmp_path, monkeypatch
+    ):
+        # A baseline scan that hits the deadline is unusable (it would count
+        # pre-existing files as growth): accounting is off, no forced trip.
+        monkeypatch.setattr("dhc.framework.caps._WORKSPACE_SCAN_DEADLINE_SECONDS", -1)
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        _write(tmp_path / "big.bin", 50_000)
+        assert workspace_file_bytes(settings) == 0
+        assert workspace_scan_truncated(settings) is True
+        assert _ws_hit(settings) is None
+
+    def test_truncated_scan_reports_partial_without_trip(self, tmp_path, monkeypatch):
+        settings = _ws_settings(tmp_path, max_workspace_bytes=1000)
+        assert _ws_hit(settings) is None  # clean baseline
+        _write(tmp_path / "growth.bin", 50_000)
+        monkeypatch.setattr("dhc.framework.caps._WORKSPACE_SCAN_DEADLINE_SECONDS", -1)
+        # Truncation alone never produces a hit; the partial count is reported.
+        assert _ws_hit(settings) is None
+        assert workspace_file_bytes(settings) == 0
+        assert workspace_scan_truncated(settings) is True

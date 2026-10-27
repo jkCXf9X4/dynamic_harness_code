@@ -36,3 +36,4 @@ status: current
 - Parent-mediated reporting, default route — `INFO-006`.
 - Shared-room channel, many-to-many — `INFO-016`.
 - Primitive spec and framework/tooling classification — `INFO-054`.
+- The composed `send` primitive and its exposure on the runtime — `INFO-058`.

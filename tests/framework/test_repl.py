@@ -155,6 +155,23 @@ def test_timeout_rolls_back_partial_mutations():
     assert check.value == 1
 
 
+def test_timeout_rolls_back_nested_mutation():
+    """The turn-start snapshot copies nested plain containers, so an
+    in-place mutation of a nested dict/list by a timed-out turn rolls back."""
+    engine = ReplEngine()
+    engine.execute("a1", "d = {'inner': {'n': 1}, 'items': [1, 2]}")
+    result = engine.execute(
+        "a1",
+        "d['inner']['n'] = 99\nd['items'].append(3)\n"
+        "import time\ntime.sleep(1)",
+        timeout=0.1,
+    )
+    assert result.reason == "turn timed out"
+    check = read(engine, "a1", "d")
+    assert check.ok is True
+    assert check.value == {"inner": {"n": 1}, "items": [1, 2]}
+
+
 def test_per_agent_isolation():
     engine = ReplEngine()
     engine.execute("a1", "x = 1")

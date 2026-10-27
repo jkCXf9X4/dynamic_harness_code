@@ -2,14 +2,14 @@
 id: INFO-069
 type: info
 title: The benchmark harness
-summary: Ground-truth benchmark tasks with verifiable outcomes, per-run isolation, derived structural metrics, and the weighted scoring rubric
+summary: Ground-truth benchmark tasks with verifiable outcomes, per-run isolation, real token accounting per resolved task, and a weighted scoring rubric
 date: 2026-10-10
 status: current
 ---
 
 # The benchmark harness
 
-The evaluation harness in `src/dhc/benchmark/`: ground-truth tasks with failable verifiers, per-(prompt, task) run isolation, derived metrics, weighted scoring. Success is an external, falsifiable check, never the agent's own report.
+The evaluation harness in `src/dhc/benchmark/`: ground-truth tasks with failable verifiers, per-(prompt, task) run isolation, real token accounting per resolved task, weighted scoring. Success is an external, falsifiable check, never the agent's own report.
 
 ## Tasks — failable ground truth
 
@@ -39,24 +39,34 @@ The evaluation harness in `src/dhc/benchmark/`: ground-truth tasks with failable
 
 ## Metrics
 
-- `RunMetrics` captures one run: ids, `status` (`completed` | `failed` | `escalated`), `correct`, `verification_note`, token counts, `cost_usd`, `agent_count` (including root), `max_depth` (0 = root only), `delegations`, `message_count`, `total_turns`, `llm_retries`, `failures`, `escalations`, `latency_s`.
+- `RunMetrics` captures one run: ids, `status` (`completed` | `failed` | `escalated`), `correct`, `verification_note`, token counts, `usage_recorded`, `agent_count` (including root), `max_depth` (0 = root only), `delegations`, `message_count`, `total_turns`, `llm_retries`, `failures`, `escalations`, `latency_s`.
 - `passed` requires status `completed` AND `correct is True`.
 - The runner maps outcome: completed stays; failed and timeout become failed; cancelled becomes escalated.
 - Structure derives from the runtime: `agent_count` from the agent registry, `delegations` as agent count minus one, `max_depth` via parent-chain walk, `total_turns` by counting `turn_started` events across agent streams.
-- Token, cost, message, retry counters are currently recorded as zero; latency is measured.
+- Token counters sum `Agent.record_usage` across every agent; `usage_recorded` is false when no provider usage arrived.
+- `tokens_per_resolved_task` is the run's total tokens when the run passed and recorded usage, else `None`.
+- `cost_usd` stays 0.0 and is unmeasured, not free: the provider exposes no usable price.
+- Message and retry counters remain zero; latency is measured.
 
 ## Scoring
 
 - Weighted rubric: correctness 0.60, cost 0.15, tokens 0.10, turns 0.07, depth 0.04, latency 0.04.
 - Correctness gates: a passed run earns 0.60; a failed run earns 0 for it.
-- Efficiency measures (`cost_usd`, `total_tokens`, `total_turns`, `max_depth`, `latency_s`) score against the batch-best run: weight times `min(1.0, best / value)`.
+- Every run's cost is 0.0, so the cost weight is constant and cost does not discriminate.
+- Tokens per resolved task is the comparison metric for the vision bet.
+- Efficiency measures (`total_tokens`, `total_turns`, `max_depth`, `latency_s`) score against the batch-best run: weight times `min(1.0, best / value)`.
 - A single-run batch scores full efficiency weight — best is the run itself.
 
 ## Output and CLI
 
-- Results land as `metrics.json` and `metrics.md` under `results_dir`, default `.optimize_benchmarks/`.
+- Results land as `metrics.json`, `metrics.md`, and `summary.json` under `results_dir`, default `.optimize_benchmarks/`.
+- `summary.json` carries the batch token aggregate: `tokens_per_resolved_task` divides measured tokens by resolved runs that reported usage.
+- A baseline is a small JSON object: `label`, `runs`, `resolved_tasks`, raw token counts, `tokens_per_resolved_task`, `notes`.
+- A baseline is only creatable from resolved runs.
+- `--baseline` compares the run set against a stored baseline; `--save-baseline` writes the current set.
+- `metrics.md` omits cost on purpose; tokens per resolved task is the comparison metric.
 - CLI: `python3 -m dhc.benchmark.run` runs `ALL_TASKS` with the default prompt and prints the score table.
-- Flags: `--results-dir` overrides the output directory; `--real` selects the real LLM driver instead of the deterministic mock.
+- Flags: `--results-dir`, `--real`, `--baseline`, `--save-baseline`, `--baseline-label`.
 
 ## Owns
 - The evaluation harness: ground-truth tasks, run isolation, metrics schema, scoring rubric, output files, CLI entry.

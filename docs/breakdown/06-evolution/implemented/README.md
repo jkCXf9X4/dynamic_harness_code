@@ -23,7 +23,7 @@ work.
 - **IMP-001** [Agent-owned executor — the REPL as the main loop](agent-owned-executor-the-repl-as-the-main-loop.md) — Workspace-owned resumable generator replaces the runtime's fixed loop — the agent authors and pumps it under a small hard-gate layer; full transparency for context, guardrails, and experimentation; mesh stays up
 - **IMP-002** [Stringly-typed event kinds in the state snapshot](stringly-typed-event-kinds-in-the-state-snapshot.md) — StateWriter matches event kinds by string literals, not the EventKind enum. Renamed or new kind silently drops from the snapshot
 - **IMP-003** [Mixed wall-clock bases across caps, step start, and sleep deadline](mixed-wall-clock-bases-across-caps-step-start-and-sleep-deadline.md) — time.time and time.monotonic mix across the caps timeout, the step start, and the sleep deadline. A wall-clock jump can trip or mask a cap
-- **IMP-004** [Inert token and cost fields on the agent state view-model](inert-token-and-cost-fields-on-the-agent-state-view-model.md) — AgentNode's token and cost fields are never populated. State view-model reports zero usage; the provider call already returns usage
+- **IMP-004** [Inert token and cost fields on the agent state view-model](inert-token-and-cost-fields-on-the-agent-state-view-model.md) — AgentNode's token and cost fields are populated by the driver seam; the state view-model renders real usage
 - **IMP-031** [run_code snippet format](run-code-snippet-format.md) — run_block accepts only def call(self, spec) payloads, validated and invoked with the agent facade; exec_block is the raw runner path
 <!-- pb:index:end -->
 

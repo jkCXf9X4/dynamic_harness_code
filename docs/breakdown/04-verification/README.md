@@ -22,5 +22,5 @@ Proof and acceptance: how each claim is checked. Facts here answer "how do we kn
 - **INFO-056** [Running the tests](running-the-tests.md) — How the suite is run — pytest commands, the deterministic MockDriver, and where the detail lives
 - **INFO-067** [Test strategy](test-strategy.md) — What the test suite verifies and how — mirrored unit tests, the framework-tooling import boundary guard, integration through build_runtime, and top-level acceptance
 - **INFO-068** [Acceptance criteria](acceptance-criteria.md) — The end-to-end criteria the kernel contract must satisfy — the D1 to D5 gates exercised by the acceptance suite
-- **INFO-069** [The benchmark harness](the-benchmark-harness.md) — Ground-truth benchmark tasks with verifiable outcomes, per-run isolation, derived structural metrics, and the weighted scoring rubric
+- **INFO-069** [The benchmark harness](the-benchmark-harness.md) — Ground-truth benchmark tasks with verifiable outcomes, per-run isolation, real token accounting per resolved task, and a weighted scoring rubric
 <!-- pb:index:end -->

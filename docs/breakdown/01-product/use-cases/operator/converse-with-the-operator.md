@@ -9,16 +9,14 @@ status: current
 
 # Converse with the operator
 
-- **Single door**
-  - Operator's request enters at root agent.
-  - Root's final result returns to operator.
-  - Boundary only door between human and agent mesh.
-- **Operator addresses root only**
-  - Never an inner agent.
-  - Inner agents reach operator only by sending result up through parent chain to root (`INFO-006`).
-- **Invisible to inner agents, one carve-out**
-  - Any agent can ask operator question through question channel (`INFO-023`).
-  - Otherwise no agent outside root can address operator or observe boundary (`INFO-004`).
+- **Default door is root**
+  - Operator's request enters at the root agent.
+  - Root's final result returns to the operator.
+  - Boundary is the only door between human and agent mesh.
+  - Steering may address a specific agent by identity (`INFO-022`).
+- **Inner agents reach the operator through the mesh**
+  - Results travel up the parent chain to root (`INFO-006`).
+  - Any agent can ask the operator a question (`INFO-023`).
 - **Reporting route**
   - Root reports to operator through same artifact tiers any consumer pulls (`INFO-006`).
 - **Hosting**
@@ -30,3 +28,4 @@ status: current
 ## Excludes
 - Inter-agent channels, which root itself also uses — `INFO-015`, `INFO-016`.
 - Hosting the runtime in a container — `INFO-008`.
+- The operator door and channel composition the runtime exposes — `INFO-058`.

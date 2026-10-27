@@ -244,6 +244,11 @@ class Settings:
 
     workspace_root: Path
     artifact_root: Path
+    #: True when the workspace root was configured explicitly (the
+    #: ``DHC_WORKSPACE_ROOT`` env seam) rather than defaulting to the process
+    #: cwd. Only an explicit root is scanned by the ``workspace_bytes`` cap:
+    #: the implicit cwd is the interpreter's, not the agent's, footprint.
+    workspace_root_explicit: bool = False
     openai_api_key: str = ""
     max_turn_seconds: float = 120.0
     log_level: str = "INFO"
@@ -307,7 +312,8 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
         load_dotenv()
         env = os.environ
 
-    workspace_root = Path(env.get("DHC_WORKSPACE_ROOT", str(Path.cwd())))
+    workspace_root_raw = env.get("DHC_WORKSPACE_ROOT")
+    workspace_root = Path(workspace_root_raw or Path.cwd())
     artifact_root = Path(
         env.get("DHC_ARTIFACT_ROOT", str(workspace_root / ".dynamic-harness" / "artifacts"))
     )
@@ -329,6 +335,7 @@ def load_settings(env: Optional[Mapping[str, str]] = None) -> Settings:
     return Settings(
         workspace_root=workspace_root,
         artifact_root=artifact_root,
+        workspace_root_explicit=bool(workspace_root_raw),
         openai_api_key=env.get("OPENAI_API_KEY", ""),
         max_turn_seconds=_float("DHC_MAX_TURN_SECONDS", 120.0),
         log_level=env.get("DHC_LOG_LEVEL", "INFO"),

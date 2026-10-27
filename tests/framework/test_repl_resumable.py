@@ -8,10 +8,15 @@ when called from inside an advance). The existing tests/test_repl.py suite
 covers the unchanged execute/reset/globals_for/has_workspace contract.
 """
 
+import threading
 import time
+
+import pytest
 
 from dhc.data.models import Result
 from dhc.framework.repl import AdvanceOutcome, ReplEngine
+
+pytestmark = pytest.mark.slow
 
 
 def read(engine, agent_id, expr):
@@ -135,6 +140,62 @@ def test_advance_timeout_workspace_usable_afterwards():
     check = read(engine, "a1", "x")
     assert check.ok is True
     assert check.value == 1
+
+
+def test_advance_timeout_rolls_back_nested_mutation():
+    """The per-advance snapshot copies nested plain containers: an in-place
+    mutation of a nested dict/list by the timed-out step rolls back."""
+    engine = ReplEngine()
+    engine.execute("a1", "d = {'inner': {'n': 1}, 'items': [1, 2]}")
+
+    def runner():
+        engine.run_block("a1", "d['inner']['n'] = 99\nd['items'].append(3)")
+        time.sleep(10)  # sleeps (releases the GIL) until the timeout fires
+        yield  # unreachable
+
+    engine.install("a1", runner())
+    outcome = engine.advance("a1", timeout=0.1)
+    assert outcome.kind == "timeout"
+    check = read(engine, "a1", "d")
+    assert check.ok is True
+    assert check.value == {"inner": {"n": 1}, "items": [1, 2]}
+
+
+# -- cancellation boundaries ----------------------------------------------- #
+
+
+def test_run_block_cancelled_stops_before_the_block():
+    """A cancelled turn raises at the block boundary instead of running."""
+    from dhc.framework.repl import TurnCancelled
+
+    engine = ReplEngine()
+    engine.execute("a1", "x = 1")
+    engine.request_cancel("a1")
+    with pytest.raises(TurnCancelled):
+        engine.run_block("a1", "x = 99")
+    assert read(engine, "a1", "x").value == 1
+
+
+def test_advance_cancelled_by_predicate_abandons_runner():
+    """The engine's bound cancel predicate ends a running step promptly."""
+    engine = ReplEngine()
+    engine.execute("a1", "x = 1")
+    flag = threading.Event()
+    engine.bind_cancel("a1", flag.is_set)
+
+    def runner():
+        time.sleep(10)  # sleeps (releases the GIL) until the cancel lands
+        yield  # unreachable
+
+    engine.install("a1", runner())
+    timer = threading.Timer(0.1, flag.set)
+    timer.start()
+    start = time.monotonic()
+    outcome = engine.advance("a1", timeout=10)
+    elapsed = time.monotonic() - start
+    assert outcome.kind == "cancelled"
+    assert elapsed < 2, f"cancelled advance blocked for {elapsed:.2f}s"
+    assert engine.advance("a1").kind == "abandoned"
 
 
 # -- inject ---------------------------------------------------------------- #

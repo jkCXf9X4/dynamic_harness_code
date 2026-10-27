@@ -27,3 +27,4 @@ status: current
 ## Excludes
 - How block verifies itself — `INFO-003`.
 - Hosting boundary execution runs inside — `INFO-008`.
+- The `run_block` surface and pump that execute the block — `INFO-037`.

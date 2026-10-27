@@ -38,6 +38,8 @@ from dhc.errors import ChannelError  # noqa: E402
 from dhc.tooling.fabrication import DEFAULT_RUNNER_SOURCE  # noqa: E402
 from dhc.data.models import AgentStatus, Completion, EventKind  # noqa: E402
 
+pytestmark = pytest.mark.slow
+
 
 # --------------------------------------------------------------------------- #
 # Helpers (replicated from tests/test_runtime.py so the fixture is
@@ -536,7 +538,8 @@ def test_runaway_containment_mesh_alive(tmp_path):
         t0 = time.monotonic()
         completion = runaway.await_()
         assert time.monotonic() - t0 < 5
-        assert completion.status == AgentStatus.timeout
+        assert completion.status == AgentStatus.failed
+        assert "timed out" in completion.reason
         # A timeout event was emitted.
         assert any(e.kind == EventKind.timeout for e in rt.events(runaway.id))
         # The workspace was rolled back: the runaway step's partial mutation

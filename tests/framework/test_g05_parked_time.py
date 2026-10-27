@@ -16,6 +16,8 @@ import pytest
 
 from dhc.data.models import AgentStatus, EventKind, is_terminal
 
+pytestmark = pytest.mark.slow
+
 
 # --------------------------------------------------------------------------- #
 # Helpers (same shape as tests/framework/test_runtime.py)
@@ -180,7 +182,8 @@ def test_g05_runaway_step_still_trips_step_timeout(tmp_path):
         t0 = time.monotonic()
         completion = runaway.await_()
         assert time.monotonic() - t0 < 5
-        assert completion.status == AgentStatus.timeout
+        assert completion.status == AgentStatus.failed
+        assert "timed out" in completion.reason
         assert any(e.kind == EventKind.timeout for e in rt.events(runaway.id))
         # The workspace was rolled back: no partial mutation from the step.
         assert "x" not in rt.repl_engine.globals_for(runaway.id)

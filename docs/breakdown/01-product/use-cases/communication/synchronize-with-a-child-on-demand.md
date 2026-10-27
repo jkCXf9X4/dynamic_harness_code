@@ -32,3 +32,4 @@ status: current
 - The fan-out shape this composes into — `INFO-009`.
 - Non-blocking inspection — `INFO-032`.
 - Push-notification instead of blocking — `INFO-033`.
+- The parked-time credit that keeps a blocked await off the wall clock — `INFO-060`.

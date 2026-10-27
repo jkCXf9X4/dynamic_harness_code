@@ -36,3 +36,7 @@ include = ["dhc*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: heavy end-to-end suite (runtime lifecycle, event durability, mesh survival); deselected by the fast lane",
+    "integration: exercises the fully wired runtime across module boundaries",
+]

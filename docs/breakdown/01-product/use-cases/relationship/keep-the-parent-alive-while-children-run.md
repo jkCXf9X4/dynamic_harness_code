@@ -43,3 +43,4 @@ status: current
   - Escalation — `INFO-011`.
   - Synchronization — `INFO-031`, `INFO-032`, `INFO-033`.
 - Crash of the parent, which fails the supervised subtree — `INFO-005`.
+- The runtime-owned completion queue that carries what children send — `INFO-047`.

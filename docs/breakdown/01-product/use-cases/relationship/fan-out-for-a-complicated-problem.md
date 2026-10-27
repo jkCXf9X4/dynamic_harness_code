@@ -31,3 +31,4 @@ status: current
 - The general decomposition contract — `INFO-004`.
 - In-task re-decomposition after children start — `INFO-010`.
 - Peer-to-peer communication between children — `INFO-012`.
+- The execution placement that lets fanned-out children run in parallel — `INFO-038`.

@@ -16,20 +16,59 @@ Storage layout under ``settings.artifact_root``::
         index.json                 # headline + summary per artifact id
         artifacts/<id>.json        # full report body per artifact
         boundary-events.jsonl      # append-only boundary event log (INFO-049)
+        metadata-conflicts.jsonl   # set-once metadata violations (INFO-006)
+        .artifact-store.lock       # advisory cross-process lock file
+
+Durability and concurrency
+--------------------------
+Every body and index write is atomic: the payload is written to a temporary
+file in the *same* directory, ``flush`` + ``os.fsync`` discard the kernel
+buffers, and ``os.replace`` publishes it. A crash mid-write therefore leaves
+either the previous file or the complete new file — never a torn body.
+
+``put`` also holds an exclusive advisory file lock (``fcntl.flock`` on
+``.artifact-store.lock``) across the whole create-and-index-update critical
+section, so concurrent writers in *different processes* are serialised rather
+than racing. Because the artifact id is the sha256 content address, racing
+writers of the same id necessarily carry the same body: the loser observes
+the winner's file, verifies it against its own body, and returns the existing
+id without rewriting anything. (On platforms without ``fcntl`` the lock
+degrades to the in-process :class:`threading.Lock` only.)
+
+Immutable metadata (set-once rule)
+----------------------------------
+Artifact bodies are immutable by construction, and so is the index metadata
+that describes them. ``headline`` and ``summary`` are written exactly once,
+by the first ``put`` that creates the id. A later ``put`` of the same id may
+only *match* those values; a differing value is ignored — the stored metadata
+wins and the attempt is appended to ``metadata-conflicts.jsonl`` with
+``reason: "immutable_metadata"``, the differing fields, and both values.
+Silent overwrites are forbidden: the audit trail must never change
+retroactively. Readers see the first writer's tiers forever.
 
 The store is thread-safe (a single :class:`threading.Lock` guards all
 mutations and the in-memory index) and survives reopen: the JSON index is
-reloaded on construction. Stored artifacts are never mutated.
+reloaded on construction and refreshed whenever the on-disk index changes
+(so a second process's publications become visible). Stored artifacts are
+never mutated.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
+
+try:  # POSIX advisory locking; absent on Windows.
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX platform guard
+    fcntl = None  # type: ignore[assignment]
 
 from ..errors import ArtifactNotFoundError
 from ..data.models import Artifact
@@ -42,6 +81,8 @@ BOUNDARY_EVENT_KINDS: frozenset[str] = frozenset(
 _INDEX_NAME = "index.json"
 _ARTIFACTS_DIR = "artifacts"
 _BOUNDARY_LOG_NAME = "boundary-events.jsonl"
+_METADATA_CONFLICTS_NAME = "metadata-conflicts.jsonl"
+_LOCK_NAME = ".artifact-store.lock"
 
 
 def _utcnow() -> datetime:
@@ -53,6 +94,74 @@ def _iso(ts: datetime) -> str:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(timezone.utc).isoformat()
+
+
+def _canonical(value: object) -> str:
+    """Canonical JSON text used as the stored body representation."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _fsync_dir(path: Path) -> None:
+    """Best-effort fsync of a directory so a rename survives a power loss."""
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:  # pragma: no cover - directory vanished
+        return
+    try:
+        os.fsync(fd)
+    except OSError:  # pragma: no cover - e.g. unusual filesystem
+        pass
+    finally:
+        os.close(fd)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write *text* to *path* atomically and durably.
+
+    Temp file in the same directory -> flush -> ``os.fsync`` -> ``os.replace``
+    -> fsync the directory. Any failure removes the temp file and leaves the
+    previous contents of *path* untouched.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f"{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:  # pragma: no cover - already gone
+            pass
+        raise
+    _fsync_dir(path.parent)
+
+
+@contextmanager
+def _advisory_lock(lock_path: Path) -> Iterator[None]:
+    """Exclusive cross-process advisory lock around a critical section.
+
+    No-op where ``fcntl`` is unavailable (non-POSIX); the in-process
+    :class:`threading.Lock` still guards concurrent threads there.
+    """
+    if fcntl is None:  # pragma: no cover - non-POSIX platform guard
+        yield
+        return
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 class ArtifactStore:
@@ -70,10 +179,24 @@ class ArtifactStore:
         self._root = Path(artifact_root)
         self._artifacts_dir = self._root / _ARTIFACTS_DIR
         self._index_path = self._root / _INDEX_NAME
+        self._lock_path = self._root / _LOCK_NAME
+        self._conflicts_path = self._root / _METADATA_CONFLICTS_NAME
         self._lock = threading.Lock()
         #: id -> {"headline": str, "summary": str}
         self._index: dict[str, dict[str, str]] = {}
+        #: (st_mtime_ns, st_size) of the index file when it was last loaded.
+        self._index_stamp: Optional[tuple[int, int]] = None
         self._load_index()
+
+    @property
+    def root(self) -> Path:
+        """The store's root directory."""
+        return self._root
+
+    @property
+    def metadata_conflicts_path(self) -> Path:
+        """Append-only log of rejected (set-once) metadata writes."""
+        return self._conflicts_path
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -85,7 +208,14 @@ class ArtifactStore:
         Idempotent for identical content: putting the same body twice returns
         the same id and does not duplicate storage. Raises
         :class:`ValueError` if the artifact's id maps to different content
-        (defensive; :class:`~dhc.models.Artifact` already validates this).
+        (defensive; :class:`~dhc.models.Artifact` already validates this), or
+        if the body already on disk does not match the incoming one.
+
+        The create-and-index-update step runs under an exclusive cross-process
+        advisory lock, so concurrent publishers of the same id converge on a
+        single body; the loser verifies the winner's body and returns its id.
+        ``headline``/``summary`` are set once — a differing re-publish is
+        ignored and logged (see the module docstring).
         """
         if not isinstance(artifact, Artifact):
             raise TypeError(
@@ -105,29 +235,27 @@ class ArtifactStore:
                     f"artifact id {aid!r} does not match content hash "
                     f"{computed!r}"
                 )
-            existing = self._index.get(aid)
-            if existing is not None:
-                # Identical content already stored: idempotent. The id is the
-                # content address, so a matching id implies a matching body;
-                # the first write's headline/summary win.
+            with _advisory_lock(self._lock_path):
+                # Another process may have published this id since our last
+                # load; re-read before deciding who creates the body.
+                self._refresh_index_locked()
+                existing = self._index.get(aid)
+                if existing is not None:
+                    self._verify_existing_locked(aid, artifact)
+                    self._note_metadata_locked(aid, existing, artifact)
+                    return aid
+                self._write_report(aid, artifact.report)
+                self._index[aid] = {
+                    "headline": artifact.headline,
+                    "summary": artifact.summary,
+                }
+                self._save_index()
                 return aid
-            self._artifacts_dir.mkdir(parents=True, exist_ok=True)
-            self._write_report(aid, artifact.report)
-            self._index[aid] = {
-                "headline": artifact.headline,
-                "summary": artifact.summary,
-            }
-            self._save_index()
-            return aid
 
     def get(self, artifact_id: str) -> Artifact:
         """Return the stored artifact (headline, summary, full report)."""
         with self._lock:
-            meta = self._index.get(artifact_id)
-            if meta is None:
-                raise ArtifactNotFoundError(
-                    f"no artifact with id {artifact_id!r}"
-                )
+            meta = self._meta(artifact_id)
             report = self._read_report(artifact_id)
         return Artifact(
             id=artifact_id,
@@ -139,54 +267,112 @@ class ArtifactStore:
     def get_headline(self, artifact_id: str) -> str:
         """Return the cheapest progressive-disclosure tier."""
         with self._lock:
-            meta = self._index.get(artifact_id)
-            if meta is None:
-                raise ArtifactNotFoundError(
-                    f"no artifact with id {artifact_id!r}"
-                )
-            return meta["headline"]
+            return self._meta(artifact_id)["headline"]
 
     def get_summary(self, artifact_id: str) -> str:
         """Return the middle progressive-disclosure tier."""
         with self._lock:
-            meta = self._index.get(artifact_id)
-            if meta is None:
-                raise ArtifactNotFoundError(
-                    f"no artifact with id {artifact_id!r}"
-                )
-            return meta["summary"]
+            return self._meta(artifact_id)["summary"]
 
     def get_report(self, artifact_id: str) -> object:
         """Return the full report body (the expensive tier)."""
         with self._lock:
-            if artifact_id not in self._index:
-                raise ArtifactNotFoundError(
-                    f"no artifact with id {artifact_id!r}"
-                )
+            self._meta(artifact_id)
             return self._read_report(artifact_id)
 
     def exists(self, artifact_id: str) -> bool:
         """True when an artifact with *artifact_id* is stored."""
         with self._lock:
-            return artifact_id in self._index
+            return self._meta(artifact_id, required=False) is not None
 
     def list_ids(self) -> list[str]:
         """Return all stored artifact ids (stable order)."""
         with self._lock:
+            self._refresh_index_locked()
             return sorted(self._index)
 
     def count(self) -> int:
         """Return the number of stored artifacts."""
         with self._lock:
+            self._refresh_index_locked()
             return len(self._index)
+
+    # ------------------------------------------------------------------ #
+    # Lookup helpers
+    # ------------------------------------------------------------------ #
+
+    def _meta(
+        self, artifact_id: str, required: bool = True
+    ) -> Optional[dict[str, str]]:
+        """Return the index entry for *artifact_id* (refreshing from disk).
+
+        Raises :class:`ArtifactNotFoundError` when *required* and absent.
+        """
+        self._refresh_index_locked()
+        meta = self._index.get(artifact_id)
+        if meta is None and required:
+            raise ArtifactNotFoundError(
+                f"no artifact with id {artifact_id!r}"
+            )
+        return meta
+
+    def _verify_existing_locked(
+        self, artifact_id: str, artifact: Artifact
+    ) -> None:
+        """Confirm the stored body equals *artifact*'s body, repairing a gap."""
+        path = self._report_path(artifact_id)
+        if not path.exists():
+            # Index entry without a body (e.g. manually deleted): heal it from
+            # the incoming artifact, which is the same content by definition.
+            self._write_report(artifact_id, artifact.report)
+            return
+        stored = _canonical(self._read_report(artifact_id))
+        incoming = _canonical(artifact.report)
+        if stored != incoming:
+            raise ValueError(
+                f"artifact {artifact_id!r} is already stored with a different "
+                f"body; refusing to overwrite an immutable artifact"
+            )
+
+    def _note_metadata_locked(
+        self,
+        artifact_id: str,
+        existing: dict[str, str],
+        artifact: Artifact,
+    ) -> None:
+        """Apply the set-once rule for headline/summary (log-only on conflict)."""
+        incoming = {"headline": artifact.headline, "summary": artifact.summary}
+        differing = sorted(
+            field for field, value in incoming.items()
+            if existing.get(field) != value
+        )
+        if not differing:
+            return
+        record = {
+            "id": artifact_id,
+            "reason": "immutable_metadata",
+            "fields": differing,
+            "stored": {f: existing.get(f) for f in differing},
+            "incoming": {f: incoming[f] for f in differing},
+            "ts": _iso(_utcnow()),
+        }
+        line = json.dumps(record, ensure_ascii=False, sort_keys=True)
+        with self._conflicts_path.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
 
     # ------------------------------------------------------------------ #
     # Persistence
     # ------------------------------------------------------------------ #
 
     def _load_index(self) -> None:
-        if not self._index_path.exists():
+        try:
+            st = self._index_path.stat()
+        except OSError:
+            self._index_stamp = None
             return
+        self._index_stamp = (st.st_mtime_ns, st.st_size)
         try:
             data = json.loads(self._index_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
@@ -206,15 +392,25 @@ class ArtifactStore:
                 )
         self._index = data
 
+    def _refresh_index_locked(self) -> None:
+        """Reload the index when another process has replaced it on disk."""
+        try:
+            st = self._index_path.stat()
+        except OSError:
+            return
+        if (st.st_mtime_ns, st.st_size) == self._index_stamp:
+            return
+        self._load_index()
+
     def _save_index(self) -> None:
-        # Atomic-ish: write temp then rename so a crash cannot leave a
-        # half-written index.
-        tmp = self._index_path.with_suffix(".json.tmp")
-        tmp.write_text(
+        # Atomic and durable: temp -> fsync -> rename, so a crash cannot leave
+        # a half-written index.
+        _atomic_write_text(
+            self._index_path,
             json.dumps(self._index, ensure_ascii=False, sort_keys=True),
-            encoding="utf-8",
         )
-        tmp.replace(self._index_path)
+        st = self._index_path.stat()
+        self._index_stamp = (st.st_mtime_ns, st.st_size)
 
     def _report_path(self, artifact_id: str) -> Path:
         return self._artifacts_dir / f"{artifact_id}.json"
@@ -224,12 +420,7 @@ class ArtifactStore:
         if path.exists():
             # Same content address => same body; nothing to do.
             return
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(report, ensure_ascii=False, sort_keys=True, default=str),
-            encoding="utf-8",
-        )
-        tmp.replace(path)
+        _atomic_write_text(path, _canonical(report))
 
     def _read_report(self, artifact_id: str) -> object:
         path = self._report_path(artifact_id)

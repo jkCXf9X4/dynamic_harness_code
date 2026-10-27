@@ -61,3 +61,4 @@ status: current
 - Completion-callback contract running inside it — `INFO-033`.
 - Turn engine workspace hosts, kernel made real — `INFO-037`.
 - Event stream REPL's pull primitives never touch — `INFO-051`.
+- Checkpoint and rollback mechanisms the kit helpers expose — `INFO-063`.
