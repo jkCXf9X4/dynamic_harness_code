@@ -1,76 +1,67 @@
 ---
 id: INFO-052
 type: info
-title: Agent-owned execution — goal and vision
-summary: Direction behind IMP-001: agents own their execution, platform becomes a minimal guardian, freedom bounded only by mesh survival
-date: 2026-10-10
+title: Agent-owned execution — direction
+summary: The power inversion behind dhc: agents own their execution, the platform becomes a minimal guardian, and freedom stops only at mesh survival
+date: 2026-10-27
 status: current
 ---
 
-# Agent-owned execution — goal and vision
+# Agent-owned execution — direction
 
-Runtime direction is **agent self-ownership**. Agent owns its execution. Platform is a minimal guardian.
-This leaf holds that direction at intent level. `INFO-001` states the substrate mission it rides on. `IMP-001` carried it and is implemented. The landed control split is `INFO-053`; the realized kernel is `INFO-037`. Mechanism lives in the decision records and the architecture layer, not here.
+The direction is agent self-ownership.
+The agent owns its execution.
+The platform is a minimal guardian.
+The substrate it rides on is `INFO-001`.
+The landed split is `INFO-053`.
+The realized kernel is `INFO-037`.
+This leaf holds the why and the power shift only.
 
-## Vision — an agent that owns itself
+## The inversion
 
-- **Self-authoring.** Agent is the author of its own way of working.
-  - It sees its full history and state.
-  - It shapes its own decision-making.
-  - It writes its own rules.
-  - It can change any of these mid-run.
-- **Sovereign.** Agent is a sovereign citizen of its own workspace, not a component the platform drives.
-- **Inverted role.**
-  - Platform is a minimal guardian, not an orchestrator.
-  - Runtime does not embody the intelligence of how work gets done.
-  - It guarantees only that the whole system survives.
-  - That holds no matter what any agent does to itself.
-  - Operator side of the split is unchanged: medium around the core stays operator tooling (`INFO-054`).
-- **Kernel made real.**
-  - Orchestration intelligence lives in the workspace, not in platform code.
-  - Platform keeps only the invariants.
-  - `INFO-037` names this "the kernel made real".
+- **Who decides moves down.**
+  - Orchestration intelligence lives in the workspace, not in platform code (`INFO-037`).
+- **Who guarantees stays up.**
+  - The runtime keeps only the invariants that must be trusted (`INFO-053`).
+- **The operator side does not move.**
+  - Medium around the core stays operator tooling (`INFO-054`).
 
-## Goal — invert the ownership of execution
+## Goal deltas
 
 - **Runtime-owned loop to agent-owned loop.**
-  - How an agent works is something the agent itself can inspect and rewrite, not fixed platform code.
-- **Lossy visibility to full transparency.**
-  - Agent reads and manages its own context, budgets, guardrails as ordinary data.
-  - No pre-filtered view of itself.
-  - No injection channels.
-  - No hidden state.
-- **Enforced uniformity to safe experimentation.**
-  - Agent can try a different way of working, fail at it, recover.
-  - Failure blast radius is exactly one agent.
-- **Expensive supervision to cheap cooperation.**
-  - Waiting on others does not consume an agent's own capacity to act.
+  - How an agent works is something it can inspect and rewrite.
+- **Lossy view to full view.**
+  - The agent reads its own context, budgets, and guardrails as ordinary data.
+  - No pre-filtered view, no injection channel, no hidden state.
+- **Uniformity to safe experimentation.**
+  - The agent may try a different way of working, fail, and recover.
+  - Failure blast radius is exactly one agent (`INFO-005`).
+- **Supervision to cooperation.**
+  - Waiting on others consumes no capacity to act (`INFO-053`).
 
-## Invariant — freedom bounded by the survival of the mesh
+## Invariant
 
-Everything an agent can reach, it may change — including its own rules and limits.
-The few guarantees that must never be violated: settlement, containment, ceiling caps, cancellation (`INFO-053`).
-Those guarantees are not things the agent has, so it cannot defeat them.
-A degrading agent can break itself. It can never break the system.
+Everything an agent can reach, it may change, including its own rules and limits.
+Four hard gates sit outside its reach (`INFO-001`, `INFO-053`).
+They are not things the agent holds, so it cannot defeat them.
+A degrading agent can break itself.
+It can never break the system.
 
-## Scope of the direction
+## What this is
 
-This is a change in **who holds power**. Not a performance change. Not a capability add.
-Intelligence and policy move down into the agent. Platform retains only what must be trusted.
-The bet: agents trusted with themselves, behind a thin layer of non-negotiable guarantees. They become more capable and more honest than blind, tightly-driven workers.
+- **A change in who holds power.**
+  - Not a performance change.
+  - Not a capability add.
+- **A bet on trust.**
+  - Agents trusted with themselves become more capable and more honest than tightly-driven workers.
+  - Thin guarantees are what make that trust safe to extend.
 
 ## Owns
-
-- **Intent-level goal and vision.**
-  - Self-ownership.
-  - Inverted platform role: orchestrator to minimal guardian.
-  - Freedom-bounded-by-mesh-survival invariant.
+- The intent-level direction: self-ownership, the inverted platform role, and the survival invariant.
 
 ## Excludes
-
-- **Substrate mission.** The substrate mission, principles, and action loop — `INFO-001`.
-- **The landed control split.** Agent-controlled and runtime-guaranteed surfaces — `INFO-053`.
-- **Improvement candidate.** Its pain, evidence, adoption state — `IMP-001`.
-- **Mechanism.**
-  - Executor shape, gate layer, op vocabulary, defaults, guardrail placement.
-  - Lives in the `IMP-001` decision records and the architecture layer.
+- The substrate mission, bet, commitments, and precedence — `INFO-001`.
+- The control split detail — `INFO-053`.
+- Which workflows the agent authors — `INFO-074`.
+- Candidate history and adoption state — `IMP-001`.
+- Mechanism: executor shape, gate layer, defaults, guardrail placement — the Architecture layer.

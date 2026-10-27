@@ -2,90 +2,98 @@
 id: INFO-001
 type: info
 title: VISION
-summary: Mission, principles, action loop, boundaries. Code as action space. Framework core vs operator tooling.
-date: 2026-10-10
+summary: Mission, the bet and its disproof, commitments, precedence order, non-goals, success criteria, and accepted costs
+date: 2026-10-27
 status: current
-pb_exempt: true
 ---
 
 # VISION
 
-**Dynamic Harness Code (dhc) is a recursive agent runtime. It maximizes LLM output quality and minimizes cost. Executable Python is the action space: every agent turn writes code. Runtime executes it in a disposable sandbox. ISO/IEC 15288 V-model discipline is enforced on every action.**
+- **Mission.**
+  - dhc is a recursive agent runtime.
+  - Executable Python is the action space: every agent turn is one code block.
+  - The runtime executes the block and guarantees the mesh survives the agent.
+- **Audience.**
+  - This leaf settles maintainer architecture calls.
+  - It is the arbiter when two design options both look defensible.
+- **Bet.**
+  - One expressive code block per turn beats several tool-call turns on cost per resolved task, at equal or better quality.
+  - Expressiveness is the mechanism: loops, fan-out, transforms, and error handling fit inside one action.
+  - Fresh-context corollary: decomposed workers beat one long monolith.
+  - The anchor is ~3K delegation overhead against >15K context rot, a claim under test rather than a measured result.
+  - The bet is refuted when a tool-call agent matches quality at no higher cost on the reference set (`INFO-069`).
 
-- **Fewer turns.** One expressive code block replaces N tool-call turns.
-- **One action.** Loops, fan-out, transforms, error handling happen inside a single action.
-- **Fresh-context economics.** Decomposed 3-turn workers beat a 20-turn monolith on cost and quality (~3K delegation overhead vs >15K context rot).
-- **Mechanism.** The code block keeps agent turns few.
+## Commitments
 
-Direction riding this substrate: agent owns its execution; platform is a minimal guardian (`INFO-052`).
+A commitment changes only when a decision record supersedes it.
+`hard` marks the mesh-survival core.
 
-## The action loop
+- **C1 (hard) Mesh survival.** Settlement, containment, ceiling caps, and cancellation are runtime behavior (`INFO-053`).
+- **C2 (hard) Containment.** A failed, hung, or runaway agent settles failed; the workspace is the blast radius (`INFO-005`). The container is the outer boundary (`INFO-008`).
+- **C3 One action per turn.** A turn is one Python block that may loop, fan out, transform, and handle its own errors (`INFO-002`).
+- **C4 Few turns.** Fewer expressive turns beat many narrow steps on cost and quality.
+- **C5 Fresh context.** Work crosses agents as content-addressed ids and summaries, never as full bodies (`INFO-006`, `INFO-004`).
+- **C6 Immutable artifacts.** Artifacts are content-addressed and tiered; an id proves the content (`INFO-006`, `AD-008`).
+- **C7 Agent-owned loop.** The loop is workspace code, pumped one step at a time, seeded as an editable fabrication (`INFO-037`, `AD-011`).
+- **C8 Enabling, not performing.** The framework supplies instruments; the agent authors policy and workflow (`INFO-074`).
+- **C9 Small core, operator medium.** The core owns loop correctness and directed messaging; rooms, escalation, and rendering sit outside it (`INFO-054`).
+- **C10 V per turn.** Each turn analyzes its requirement, implements, verifies against parent criteria, and reports (`INFO-003`).
 
-- **Emit.** Agent emits Python for its turn.
-- **Persist.** Runtime persists code as immutable artifact.
-- **Agent-owned loop.**
-  - Loop itself is agent-authored workspace code, living in the agent's REPL (`INFO-050`, `INFO-037`).
-  - Runtime pumps it one step at a time.
-- **V-model per turn.** Code analyzes its allocated requirement, implements, verifies against parent's acceptance criteria, reports. Small V per turn.
+## Precedence
 
-## Principles
+When commitments conflict, the higher line wins.
 
-- **Container-hosted.** Full dhc runtime runs inside Docker/Podman, the outer security and deployment boundary.
-- **Agent = unit of execution.**
-  - Every agent wraps in its own thread/process.
-  - Failed child is contained, rolled back, settles failed (`INFO-005`).
-  - Workspace is the blast radius.
-- **Clean Python, runtime-owned plumbing.**
-  - Agent code is Python. Harness plumbing is runtime-owned.
-  - Control split is who enforces, not visibility: plumbing is visible to the agent (`INFO-053`).
-  - Agent reads and manages its full state as ordinary data. No pre-filtered view of itself. No hidden state.
-  - Rot detection is runtime-owned instrumentation: invisible by default, authorable by explicit opt-in (`INFO-021`).
-  - Rot policy `context.rot_policy` (threshold and reaction) is ordinary workspace data the agent may author and edit.
-  - Rot policy is observe-only by default.
-  - Agent may loosen or tighten it, within the ceiling caps (`INFO-053`).
-- **Agent-developed tools.**
-  - Capabilities are extensible by agents themselves, outside harness release cycle.
-  - Harness is substrate, not tool set.
-- **Recursive task decomposition.** Parents decompose by writing delegation code.
-- **Context encapsulation.**
-  - Agent's context is its scarcest resource.
-  - Work crosses agents as content-addressed ids and summaries, never as full bodies.
-  - Mesh shares findings without polluting each other's context.
-  - Detail pulls tier by tier, only when consumer needs it (`INFO-006`, `INFO-012`).
-- **Immutable, verifiable artifacts.**
-  - Whatever crosses the mesh — findings, results, code of every action — is an immutable, content-addressed artifact.
-  - Handed-off claim cannot silently change. Its id proves what it contains.
-  - Delivery — protocol, tiers, storage — is architecture, not vision (`INFO-006`, `AD-008`).
-- **Progressive disclosure.**
-  - Artifacts expose headline, summary, report tiers.
-  - Consumers pull detail on demand.
-- **Per-agent persistent REPL.**
-  - Every agent works in a persistent computational workspace of its own.
-  - REPL state persists across actions. Agent-developed tools live in it.
-  - Artifacts remain the durable medium for findings crossing agents or outliving the agent.
-- **Core owns the contract.**
-  - Framework core is a small, stable set of guarantees.
-  - Guarantee set is the runtime-control list plus the directed-message primitive (`INFO-053`, `INFO-054`).
-  - Any agent can `send` to any other by identity.
-  - Message is guaranteed to reach the recipient's awareness (`AD-009`).
-- **Operator owns the medium.**
-  - Operator needs: persisting, observing, rendering state.
-  - Every communication pattern above direct messaging — rooms, escalation routing, operator questions — is tooling composed around the core.
-  - Tooling is one-way dependent on the core, never inside it.
-  - Agent's communication beyond the primitive is its own composition choice.
-  - Where the line falls for a new concern is decided in the architecture (`INFO-054`, `AD-008`, `AD-009`).
+1. Mesh survival over agent freedom (`INFO-053`).
+2. Containment over visibility into the failure.
+3. Fresh context over thread continuity.
+4. Few turns over per-step granularity.
+5. Agent-owned workflow over framework convenience (`INFO-074`).
+6. Visible state over hidden mechanism (`INFO-053`).
+7. Operator tooling outside the core, never inside (`INFO-054`).
+
+## Non-goals
+
+- **No model work.** dhc does not train, fine-tune, or rank models.
+- **No tool registry.** Capabilities are agent-authored, not curated (`INFO-007`).
+- **No workflow engine.** There is no declarative graph; the loop is code (`INFO-037`).
+- **No prompt framework.** Prompt assembly is a workspace function (`INFO-053`).
+- **No multi-tenant service.** One operator door per mesh (`INFO-017`).
+- **No untrusted-code sandbox.** The container is the security boundary (`INFO-008`).
+
+## Success criteria
+
+All of these must hold on the reference set (`INFO-068`).
+
+- **Cost.** Tokens per resolved task stay below the tool-call baseline (`INFO-069`).
+- **Quality.** Task success equals or beats that baseline.
+- **Turn count.** Turns per resolved task stay lower than the baseline.
+- **Delegation overhead.** Overhead stays below the parent context it saves.
+- **Containment.** No single agent failure degrades the mesh.
+- **Disproof stands.** A failed bet ends the direction; framework policy is not added to rescue it.
+
+## Costs accepted
+
+- **Control flow is not reproducible.** The loop is agent code; the artifact and event trail carries the audit (`INFO-037`, `INFO-027`).
+- **Trust surface inside the container.** Agent code is arbitrary Python (`INFO-072`).
+- **Review cost.** Behaviour lives in code and artifacts, not in configuration.
+- **Onboarding cost.** Defaults are starting points to edit, not a stable abstraction (`AD-011`).
+- **Weaker static guarantees.** Guarantees are runtime gates, not types.
 
 ## Inspirations
 
-- **dynamic_harness**
-  - V-model discipline, encapsulation, context economics carry over. Tool calls do not.
-- **CodeAct**
-  - Executable code actions elicit better LLM agents.
-- **ISO/IEC 15288**
-  - V-model, system breakdown structure.
-- **Actor model** (Erlang, Akka)
-  - Private state, message passing, supervision.
-- **Distributed builds** (Bazel, Nix)
-  - Immutable artifacts. Reproducibility.
-- **Operating systems**
-  - Process isolation. Disposable processes.
+- **dynamic_harness.** Carries V-model discipline, encapsulation, and context economics, not tool calls.
+- **CodeAct.** Executable code actions elicit better agents.
+- **ISO/IEC 15288.** V-model and system breakdown structure.
+- **Actor model.** Private state, message passing, supervision.
+- **Bazel and Nix.** Immutable artifacts and reproducibility.
+
+## Owns
+- The substrate direction: mission, bet, commitments, precedence, non-goals, success criteria, and accepted costs.
+
+## Excludes
+- Power distribution between agent and platform — `INFO-052`.
+- The control split detail — `INFO-053`.
+- The core boundary — `INFO-054`.
+- Which workflows stay with the agent — `INFO-074`.
+- Promised behavior and scenarios — the Product layer.
+- Mechanism, shape, and defaults — the Architecture layer.

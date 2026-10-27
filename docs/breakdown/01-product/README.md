@@ -18,7 +18,8 @@ The promised deliverable: the externally observable behavior the dhc runtime com
 
 <!-- pb:index:start -->
 <!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
-- **INFO-053** [The control split — agent vs runtime](the-control-split-agent-vs-runtime.md) — The product-level control boundary: everything reachable in an agent's workspace is the agent's to inspect and change; every mesh-survival guarantee is runtime behavior no agent code can edit or skip
-- **INFO-054** [The core boundary — what the framework core knows](the-core-boundary-what-the-framework-core-knows.md) — The boundary orthogonal to the control split: the framework core carries only what the control loop needs to be correct plus the directed-message primitive; everything that persists, observes, or renders state is operator tooling composed around it
+- **INFO-053** [The control split — agent vs runtime](the-control-split-agent-vs-runtime.md) — Product-level control boundary: everything reachable in an agent workspace is the agent's to inspect and change. Every mesh-survival guarantee is runtime behavior no agent code can edit or skip.
+- **INFO-054** [The core boundary — what the framework core knows](the-core-boundary-what-the-framework-core-knows.md) — Boundary orthogonal to the control split: framework core carries only what the control loop needs to be correct, plus the directed-message primitive. Everything that persists, observes, or renders state is operator tooling composed around it.
+- **INFO-074** [Capabilities the framework enables, not performs](capabilities-the-framework-enables-not-performs.md) — Which scenario classes the framework supplies instruments for, and which workflow decisions stay with the agent
 - [Use cases](use-cases/README.md) — The use cases the dhc runtime commits to, extracted from the vision
 <!-- pb:index:end -->

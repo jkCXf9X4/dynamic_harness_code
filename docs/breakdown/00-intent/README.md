@@ -18,6 +18,6 @@ The product's reason to exist: mission, goals, scope, and boundaries for the dhc
 
 <!-- pb:index:start -->
 <!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
-- **INFO-001** [VISION](vision.md) — Mission, principles, action loop, and boundaries — code-as-action-space, and framework core vs operator tooling
-- **INFO-052** [Agent-owned execution — goal and vision](agent-owned-execution-goal-and-vision.md) — The direction behind IMP-001: agents own their execution, the platform becomes a minimal guardian, and freedom is bounded only by the survival of the mesh
+- **INFO-001** [VISION](vision.md) — Mission, the bet and its disproof, commitments, precedence order, non-goals, success criteria, and accepted costs
+- **INFO-052** [Agent-owned execution — direction](agent-owned-execution-goal-and-vision.md) — The power inversion behind dhc: agents own their execution, the platform becomes a minimal guardian, and freedom stops only at mesh survival
 <!-- pb:index:end -->
