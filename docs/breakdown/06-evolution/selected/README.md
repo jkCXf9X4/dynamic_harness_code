@@ -22,5 +22,5 @@ Currently empty — no selected-but-not-yet-decided candidates.
 
 <!-- pb:index:start -->
 <!-- GENERATED FILE — do not edit. Regenerate with pb-registers. -->
-
+- **IMP-032** [Per-agent process isolation](per-agent-process-isolation.md) — Run each agent in its own supervised OS process so cancellation kills, CPU is capped per agent, and settlement stays parent-side
 <!-- pb:index:end -->
